@@ -6,9 +6,12 @@ function loadPrompt(filename: string): string {
 }
 
 const generatorTemplate = loadPrompt('generator.md');
+const generatorExamples = loadPrompt('generator-examples.md');
 const evaluatorTemplate = loadPrompt('evaluator.md');
+const evaluatorExamples = loadPrompt('evaluator-examples.md');
 const openEndedTask = loadPrompt('open-ended-task.md');
-const canonicalGeneratorPrompt = `${generatorTemplate}\n\n${openEndedTask}`;
+const canonicalGeneratorPrompt = `${generatorTemplate}\n\n${generatorExamples}\n\n${openEndedTask}`;
+const canonicalEvaluatorPrompt = `${evaluatorTemplate}\n\n${evaluatorExamples}`;
 
 export interface CanonicalPromptDefinition {
   key: 'generator' | 'evaluator';
@@ -21,12 +24,12 @@ export function getCanonicalPromptDefinitions(): CanonicalPromptDefinition[] {
     {
       key: 'generator',
       template: canonicalGeneratorPrompt,
-      sourcePaths: ['prompts/generator.md', 'prompts/open-ended-task.md'],
+      sourcePaths: ['prompts/generator.md', 'prompts/generator-examples.md', 'prompts/open-ended-task.md'],
     },
     {
       key: 'evaluator',
-      template: evaluatorTemplate,
-      sourcePaths: ['prompts/evaluator.md'],
+      template: canonicalEvaluatorPrompt,
+      sourcePaths: ['prompts/evaluator.md', 'prompts/evaluator-examples.md'],
     },
   ];
 }
@@ -46,7 +49,7 @@ export function buildGeneratorInput(topic: string, candidateCount: number, reque
 }
 
 export function getEvaluatorInstructions(): string {
-  return evaluatorTemplate;
+  return canonicalEvaluatorPrompt;
 }
 
 export function buildEvaluatorInput(candidateQuestions: string, request: string): string {

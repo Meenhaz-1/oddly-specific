@@ -11,6 +11,8 @@ A strong question should usually have these characteristics:
 1. **Solvable without prior recall**
    - A player who does not know the fact should still be able to make progress from the clues.
    - The question should reward inference, connection, elimination, visual observation, or first-principles reasoning.
+   - Partial recall is acceptable when the clues narrow the answer meaningfully and the reveal remains rewarding.
+   - One decisive clue can be fair. It must require a reasoning step rather than state, translate, or define the answer.
 2. **Satisfying reveal**
    - The answer should make the clues feel more meaningful in hindsight.
    - A good reaction is:
@@ -23,6 +25,7 @@ A strong question should usually have these characteristics:
    - Do not include multiple redundant clues pointing to the same answer.
    - Do not explain the key mechanism before asking the question.
    - Do not include the answer, a synonym, or a giveaway modern context in the stem.
+   - Stop before explaining the central mechanism; reserve it for the reveal.
 4. **Interesting underlying fact**
    - Prefer unusual mechanisms, hidden purposes, forgotten origins, surprising constraints, linguistic journeys, economic incentives, or familiar objects with unnoticed details.
    - Avoid generic trivia.
@@ -89,12 +92,12 @@ Reject any candidate that is:
 
 - common quiz chestnut with no fresh framing
 - obscure but impossible to infer
-- too obvious because the clue set collapses the answer space
+- effectively answered by literal, translated, synonymous, or giveaway clues
 - over-explained
 - ambiguous
 - dependent on a dubious anecdote
 - repetitive in format
-- merely “interesting fact + what is it?”
+- an interesting fact with neither a meaningful player-facing route nor a satisfying payoff
 - decorative visual with no solving value
 
 ## Output format
