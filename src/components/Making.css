@@ -1,0 +1,46 @@
+.making {
+  padding: clamp(60px, 18vw, 130px) clamp(20px, 5vw, 46px) 120px;
+  min-height: 60vh;
+}
+
+.making__title {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: clamp(30px, 8vw, 44px);
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+  margin: 14px 0 34px;
+}
+
+.making__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-top: 1px solid var(--line-strong);
+  max-width: 30em;
+}
+
+.making__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 15px 2px;
+  border-bottom: 1px solid var(--line-soft);
+  transition: opacity 0.5s ease;
+}
+.making__row .hand {
+  font-size: 24px;
+}
+
+.making__step {
+  font-size: 15.5px;
+  color: var(--ink-soft);
+}
+
+.making__footnote {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 17px;
+  color: var(--muted);
+  margin: 30px 0 0;
+}

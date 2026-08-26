@@ -1,0 +1,227 @@
+.landing {
+  padding: clamp(26px, 6vw, 48px) clamp(20px, 5vw, 46px) 56px;
+}
+
+.landing__hero {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: clamp(38px, 10.5vw, 62px);
+  line-height: 0.98;
+  letter-spacing: -0.02em;
+  margin: 0 0 4px;
+  max-width: 12em;
+  text-wrap: pretty;
+}
+
+.landing__sub {
+  font-size: clamp(15px, 4vw, 18px);
+  line-height: 1.45;
+  color: var(--body-text);
+  margin: 0;
+  max-width: 30em;
+}
+
+/* ---- Try-one sample card ---- */
+
+.sample {
+  position: relative;
+  margin: 34px 0 0;
+}
+
+.sample__clip {
+  position: absolute;
+  z-index: 3;
+  border-radius: 8px;
+  border-bottom-color: transparent !important;
+}
+.sample__clip--a {
+  top: -14px;
+  right: 16px;
+  width: 13px;
+  height: 54px;
+  border: 2.5px solid #8a8880;
+  transform: rotate(9deg);
+}
+.sample__clip--b {
+  top: -8px;
+  right: 21px;
+  width: 5px;
+  height: 40px;
+  border: 2px solid #a9a7a0;
+  border-radius: 5px;
+  transform: rotate(9deg);
+}
+
+.sample__card {
+  background: var(--paper-raised);
+  border: 1px solid var(--line-strong);
+  box-shadow: 3px 4px 0 rgba(27, 26, 23, 0.06), 0 14px 30px -22px rgba(27, 26, 23, 0.5);
+  padding: 20px clamp(18px, 4.5vw, 26px) 0;
+  position: relative;
+}
+
+.sample__question {
+  font-family: var(--font-serif);
+  font-size: clamp(21px, 5.6vw, 26px);
+  line-height: 1.24;
+  margin: 0 0 20px;
+  letter-spacing: -0.01em;
+  text-wrap: pretty;
+}
+
+.sample__image {
+  position: relative;
+  margin: 0 -6px;
+  cursor: zoom-in;
+  height: clamp(180px, 46vw, 250px);
+  background: #e6e1d3;
+  box-shadow: 0 6px 18px -10px rgba(27, 26, 23, 0.6);
+}
+
+.sample__tape {
+  position: absolute;
+  left: 50%;
+  bottom: -9px;
+  transform: translateX(-50%) rotate(-1.2deg);
+  width: 78px;
+  height: 24px;
+  background: rgba(230, 222, 197, 0.86);
+  border-left: 1px solid rgba(27, 26, 23, 0.06);
+  border-right: 1px solid rgba(27, 26, 23, 0.06);
+  box-shadow: 0 1px 3px rgba(27, 26, 23, 0.13);
+  pointer-events: none;
+}
+
+.sample__prompt {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 22px 2px 18px;
+}
+.sample__prompt .hand:first-child {
+  font-size: 27px;
+  transform: rotate(-2deg);
+}
+.sample__prompt .hand:last-child {
+  font-size: 24px;
+}
+
+.sample__reveal {
+  border-top: 1px solid var(--line-soft);
+  margin: 0 -26px;
+  padding: 0 clamp(18px, 4.5vw, 26px);
+}
+
+.sample__answer-wrap {
+  padding: 18px 0 20px;
+}
+.sample__answer-wrap .hand-answer {
+  font-size: 34px;
+}
+
+.sample__explain {
+  font-family: var(--font-serif);
+  font-size: 16.5px;
+  line-height: 1.5;
+  color: var(--ink-soft);
+  margin: 16px 0 0;
+}
+
+.sample__cta {
+  margin-top: 14px;
+}
+
+/* ---- Topics list ---- */
+
+.topics {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--line-strong);
+}
+
+.topics__row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 17px 8px 17px 20px;
+  border-bottom: 1px solid var(--line-strong);
+  cursor: pointer;
+  transition: background 0.16s ease, padding-left 0.16s ease;
+}
+.topics__row:hover {
+  background: rgba(216, 161, 28, 0.1);
+  padding-left: 28px;
+}
+
+.topics__tab {
+  position: absolute;
+  left: -14px;
+  top: 9px;
+  bottom: 9px;
+  width: 16px;
+  border: 1px solid rgba(27, 26, 23, 0.14);
+  border-right: none;
+}
+
+.topics__name {
+  font-family: var(--font-serif);
+  font-size: clamp(19px, 4.8vw, 22px);
+  letter-spacing: -0.01em;
+}
+
+.topics__count {
+  margin-left: auto;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+}
+
+.topics__arrow {
+  font-size: 17px;
+  color: var(--forest);
+}
+
+/* ---- Other topic ---- */
+
+.other-topic {
+  display: flex;
+  margin-top: 26px;
+  border: 1px solid var(--line-strong);
+  background: var(--paper-raised);
+}
+
+.other-topic__input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  padding: 16px;
+  font-size: 16px;
+  color: var(--ink);
+}
+
+.other-topic__submit {
+  border: none;
+  border-left: 1px solid var(--line-strong);
+  background: var(--forest);
+  color: var(--paper);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  padding: 0 20px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.other-topic__submit:hover {
+  background: #1e4335;
+}
+
+.landing__footnote {
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  margin: 18px 0 0;
+  letter-spacing: 0.01em;
+}

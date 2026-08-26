@@ -1,0 +1,20 @@
+.menu {
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--paper-raised);
+  padding: 14px clamp(20px, 5vw, 46px) 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.menu__link {
+  padding: 11px 0;
+  border-bottom: 1px dotted var(--line);
+  font-size: 16px;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+}
+
+.menu__link:last-child {
+  border-bottom: none;
+}

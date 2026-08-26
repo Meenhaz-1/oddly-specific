@@ -1,0 +1,72 @@
+.done {
+  padding: clamp(30px, 7vw, 54px) clamp(20px, 5vw, 46px) 60px;
+}
+
+.done__title {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: clamp(34px, 9.5vw, 52px);
+  line-height: 1.02;
+  letter-spacing: -0.02em;
+  margin: 14px 0 0;
+}
+
+.done__sub {
+  font-family: var(--font-serif);
+  font-size: 18px;
+  line-height: 1.5;
+  color: var(--body-text);
+  margin: 0 0 34px;
+  max-width: 30em;
+}
+
+.done__recap {
+  border-top: 1px solid var(--line-strong);
+}
+
+.done__row {
+  display: flex;
+  gap: 14px;
+  padding: 15px 4px;
+  border-bottom: 1px solid var(--line-soft);
+  align-items: baseline;
+}
+
+.done__num {
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  min-width: 22px;
+}
+
+.done__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.done__setup {
+  font-family: var(--font-serif);
+  font-size: 17.5px;
+  line-height: 1.35;
+  text-wrap: pretty;
+}
+
+.done__answer {
+  font-family: var(--font-hand);
+  font-size: 23px;
+  color: var(--blue);
+  margin-top: 4px;
+}
+
+.done__state {
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  color: var(--faint);
+  text-transform: uppercase;
+}
+
+.done__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 30px;
+}

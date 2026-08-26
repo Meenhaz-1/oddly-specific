@@ -1,0 +1,66 @@
+:root {
+  --ink: #1b1a17;
+  --ink-soft: #35322c;
+  --body-text: #46433c;
+  --muted: #7a776e;
+  --faint: #9a978e;
+  --forest: #16342a;
+  --gold: #d8a11c;
+  --gold-deep: #b8860f;
+  --blue: #2a47a8;
+  --outer-bg: #ede8da;
+  --paper: #f7f3e9;
+  --paper-raised: #fcfaf3;
+  --line: rgba(27, 26, 23, 0.18);
+  --line-soft: rgba(27, 26, 23, 0.14);
+  --line-strong: rgba(27, 26, 23, 0.28);
+  --font-serif: 'Newsreader', Georgia, serif;
+  --font-sans: 'Archivo Narrow', 'Helvetica Neue', Arial, sans-serif;
+  --font-hand: 'Caveat', cursive;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--outer-bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  color: var(--forest);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--gold-deep);
+}
+
+input {
+  font: inherit;
+}
+input:focus {
+  outline: none;
+}
+
+button {
+  font: inherit;
+  font-family: inherit;
+}
+
+::selection {
+  background: rgba(216, 161, 28, 0.35);
+}
+
+#root {
+  min-height: 100vh;
+}

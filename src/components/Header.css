@@ -1,0 +1,119 @@
+.site-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px clamp(20px, 5vw, 46px);
+  border-bottom: 1px solid var(--line-soft);
+  background: rgba(247, 243, 233, 0.92);
+  backdrop-filter: blur(4px);
+  position: sticky;
+  top: 0;
+  z-index: 12;
+}
+
+.site-header__logo {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.site-header__wordmark {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.02;
+}
+
+.site-header__wordmark span {
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.16em;
+  color: var(--forest);
+  text-transform: uppercase;
+}
+
+.site-header__star {
+  font-family: var(--font-serif);
+  font-size: 20px;
+  line-height: 1;
+  color: var(--gold);
+}
+
+.site-header__progress {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 1;
+  min-width: 0;
+}
+
+.site-header__divider {
+  width: 1px;
+  height: 20px;
+  background: var(--line);
+}
+
+.site-header__back {
+  font-size: 19px;
+  line-height: 1;
+  color: var(--body-text);
+  cursor: pointer;
+  padding: 2px 4px;
+  transition: color 0.15s ease;
+}
+.site-header__back:hover {
+  color: var(--forest);
+}
+
+.site-header__topic {
+  font-size: 15px;
+  color: var(--body-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.site-header__count {
+  margin-left: auto;
+  font-size: 15px;
+  letter-spacing: 0.04em;
+  color: var(--body-text);
+  white-space: nowrap;
+}
+.site-header__count b {
+  color: var(--ink);
+}
+
+.site-header__new {
+  border: 0;
+  border-bottom: 1px dashed currentColor;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  padding: 2px 0;
+  white-space: nowrap;
+}
+
+@media (max-width: 520px) {
+  .site-header__topic { display: none; }
+  .site-header__progress { gap: 10px; }
+}
+
+.site-header__menu-btn {
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 6px;
+  cursor: pointer;
+  background: none;
+  border: none;
+}
+.site-header__menu-btn span {
+  display: block;
+  width: 22px;
+  height: 1.5px;
+  background: var(--ink);
+}

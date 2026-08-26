@@ -1,0 +1,659 @@
+import 'dotenv/config';
+import { randomUUID } from 'node:crypto';
+import express from 'express';
+import OpenAI from 'openai';
+import { createServer as createViteServer } from 'vite';
+import type { GeneratedQuiz, OpenEndedQuestion } from './src/types';
+import { buildEvaluatorPrompt, buildGeneratorPrompt } from './server/prompts';
+import {
+  isSupabaseConfigured,
+  markEvaluationFailed,
+  persistEvaluations,
+  persistGeneratedQuiz,
+  saveQuestionFeedback,
+  syncPromptVersions,
+  type ResponseAudit,
+} from './server/persistence';
+
+const app = express();
+const port = Number(process.env.PORT || 5173);
+const defaultModel = process.env.OPENAI_MODEL || 'gpt-5.4-mini';
+const generatorModel = process.env.OPENAI_GENERATOR_MODEL || defaultModel;
+const evaluatorModel = process.env.OPENAI_EVALUATOR_MODEL || defaultModel;
+
+function apiErrorDetails(error: unknown): { status?: number; message: string } {
+  if (!(error instanceof Error)) return { message: String(error) };
+  const possibleStatus = (error as Error & { status?: unknown }).status;
+  return { status: typeof possibleStatus === 'number' ? possibleStatus : undefined, message: error.message };
+}
+
+function responseStats(result: {
+  id?: string;
+  usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number } | null;
+  output?: Array<{ type?: string }>;
+}): string {
+  const usage = result.usage;
+  const webSearches = result.output?.filter((item) => item.type === 'web_search_call').length ?? 0;
+  return [
+    result.id ? `response=${result.id}` : null,
+    usage ? `tokens=${usage.input_tokens ?? '?'} in/${usage.output_tokens ?? '?'} out/${usage.total_tokens ?? '?'} total` : null,
+    `web-search calls=${webSearches}`,
+  ].filter(Boolean).join(', ');
+}
+
+function responseAudit(result: {
+  id?: string;
+  usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number } | null;
+  output?: Array<{ type?: string }>;
+}, durationMs: number): ResponseAudit {
+  return {
+    responseId: result.id ?? null,
+    inputTokens: result.usage?.input_tokens ?? null,
+    outputTokens: result.usage?.output_tokens ?? null,
+    totalTokens: result.usage?.total_tokens ?? null,
+    webSearchCalls: result.output?.filter((item) => item.type === 'web_search_call').length ?? 0,
+    durationMs,
+  };
+}
+
+interface CandidateEvaluation {
+  candidateId: string;
+  decision: 'ACCEPT' | 'REWRITE' | 'REJECT';
+  scores: {
+    solvability: number;
+    revealQuality: number;
+    clueDiscipline: number;
+    originality: number;
+    answerPrecision: number;
+    wordingEfficiency: number;
+  };
+  overall: number;
+  clueLeakageIssues: string[];
+  alternativeAnswers: Array<{ answer: string; assessment: string }>;
+  factualConfidence: 'High' | 'Medium' | 'Low';
+  decisionRationale: string;
+  rewrite: {
+    applied: boolean;
+    context: string;
+    prompt: string;
+    answerShort: string;
+    answerExplanation: string;
+    score: number;
+  };
+}
+
+interface EvaluationResult {
+  evaluations: CandidateEvaluation[];
+}
+
+function passesShippingBar(evaluation: CandidateEvaluation): boolean {
+  return (
+    evaluation.decision !== 'REJECT' &&
+    evaluation.overall >= 4 &&
+    evaluation.scores.solvability >= 4 &&
+    evaluation.scores.revealQuality >= 4 &&
+    evaluation.scores.clueDiscipline >= 4 &&
+    evaluation.scores.answerPrecision >= 4 &&
+    evaluation.factualConfidence !== 'Low' &&
+    (!evaluation.rewrite.applied || evaluation.rewrite.score >= 4)
+  );
+}
+
+const candidateDirections = [
+  { label: 'NUMERICAL REASONING', direction: 'numerical or first-principles reasoning' },
+  { label: 'HIDDEN PURPOSE', direction: 'hidden purpose or overlooked urban mechanism' },
+  { label: 'LINGUISTIC CONNECTION', direction: 'linguistic journey or precise word origin' },
+  { label: 'REVERSE ENGINEER', direction: 'reverse-engineer a familiar object or artifact' },
+  { label: 'HISTORICAL CONSEQUENCE', direction: 'historical consequence or institutional constraint' },
+  { label: 'SCIENTIFIC MECHANISM', direction: 'scientific or biological mechanism' },
+  { label: 'ECONOMIC INCENTIVE', direction: 'economic incentive or unintended consequence' },
+  { label: 'GEOGRAPHIC INFERENCE', direction: 'geographic inference from an unusual constraint' },
+  { label: 'ORIGINAL USE', direction: 'original use that differs from the modern use' },
+  { label: 'SURPRISING CONNECTION', direction: 'surprising connection between two well-supported facts' },
+] as const;
+
+async function mapWithConcurrency<T, R>(items: T[], concurrency: number, mapper: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapper(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+app.use(express.json({ limit: '100kb' }));
+
+function createQuizSchema(questionCount: number) {
+  const questionIds = Array.from({ length: questionCount }, (_, index) => `q${String(index + 1).padStart(2, '0')}`);
+  return {
+  type: 'object',
+  additionalProperties: false,
+  required: ['title', 'teaser', 'questions'],
+  properties: {
+    title: { type: 'string' },
+    teaser: { type: 'string' },
+    questions: {
+      type: 'array',
+      minItems: questionCount,
+      maxItems: questionCount,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['id', 'position', 'label', 'format', 'context', 'prompt', 'answer', 'sources'],
+        properties: {
+          id: { type: 'string', enum: questionIds },
+          position: { type: 'integer', minimum: 1, maximum: 10 },
+          label: { type: 'string', pattern: "^[A-Z0-9 &'’-]+$", maxLength: 32 },
+          format: { type: 'string', enum: ['open_ended'] },
+          context: { type: 'string', minLength: 40, maxLength: 700 },
+          prompt: { type: 'string', minLength: 8, maxLength: 220 },
+          answer: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['short', 'explanation'],
+            properties: {
+              short: { type: 'string', minLength: 1, maxLength: 60 },
+              explanation: { type: 'string', minLength: 30, maxLength: 500 },
+            },
+          },
+          sources: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 3,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['id', 'title', 'publisher', 'url'],
+              properties: {
+                id: { type: 'string', pattern: '^s[0-9]{2}[a-c]$' },
+                title: { type: 'string' },
+                publisher: { type: 'string' },
+                url: { type: 'string' },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  };
+}
+
+function createEvaluationSchema(candidateCount: number) {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: ['evaluations'],
+    properties: {
+      evaluations: {
+        type: 'array',
+        minItems: candidateCount,
+        maxItems: candidateCount,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: [
+            'candidateId',
+            'decision',
+            'scores',
+            'overall',
+            'clueLeakageIssues',
+            'alternativeAnswers',
+            'factualConfidence',
+            'decisionRationale',
+            'rewrite',
+          ],
+          properties: {
+            candidateId: { type: 'string' },
+            decision: { type: 'string', enum: ['ACCEPT', 'REWRITE', 'REJECT'] },
+            scores: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['solvability', 'revealQuality', 'clueDiscipline', 'originality', 'answerPrecision', 'wordingEfficiency'],
+              properties: {
+                solvability: { type: 'integer', minimum: 1, maximum: 5 },
+                revealQuality: { type: 'integer', minimum: 1, maximum: 5 },
+                clueDiscipline: { type: 'integer', minimum: 1, maximum: 5 },
+                originality: { type: 'integer', minimum: 1, maximum: 5 },
+                answerPrecision: { type: 'integer', minimum: 1, maximum: 5 },
+                wordingEfficiency: { type: 'integer', minimum: 1, maximum: 5 },
+              },
+            },
+            overall: { type: 'number', minimum: 1, maximum: 5 },
+            clueLeakageIssues: { type: 'array', items: { type: 'string' } },
+            alternativeAnswers: {
+              type: 'array',
+              minItems: 3,
+              maxItems: 3,
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['answer', 'assessment'],
+                properties: { answer: { type: 'string' }, assessment: { type: 'string' } },
+              },
+            },
+            factualConfidence: { type: 'string', enum: ['High', 'Medium', 'Low'] },
+            decisionRationale: { type: 'string' },
+            rewrite: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['applied', 'context', 'prompt', 'answerShort', 'answerExplanation', 'score'],
+              properties: {
+                applied: { type: 'boolean' },
+                context: { type: 'string' },
+                prompt: { type: 'string' },
+                answerShort: { type: 'string' },
+                answerExplanation: { type: 'string' },
+                score: { type: 'number', minimum: 0, maximum: 5 },
+              },
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
+async function evaluateQuestionsInBackground(
+  openai: OpenAI,
+  questions: OpenEndedQuestion[],
+  parentRunId: string,
+): Promise<{ evaluations: CandidateEvaluation[]; audit: ResponseAudit } | { error: string }> {
+  const runId = `${parentRunId}-EVAL`;
+  const startedAt = Date.now();
+  console.log(`[${runId}] Background evaluation started for ${questions.length} questions with ${evaluatorModel}.`);
+  try {
+    const evaluationResponse = await openai.responses.create({
+      model: evaluatorModel,
+      instructions: buildEvaluatorPrompt(JSON.stringify(questions)),
+      input: 'Evaluate every candidate independently and return the structured decisions now.',
+      tools: [{ type: 'web_search' }],
+      reasoning: { effort: 'medium' },
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'background_candidate_evaluations',
+          strict: true,
+          schema: createEvaluationSchema(questions.length),
+        },
+      },
+      max_output_tokens: 18000,
+      store: false,
+    });
+    const evaluationResult = JSON.parse(evaluationResponse.output_text) as EvaluationResult;
+    console.log(
+      `[${runId}] Background evaluation completed in ${Math.round((Date.now() - startedAt) / 1000)}s ` +
+      `(${responseStats(evaluationResponse)}).`,
+    );
+    for (const evaluation of evaluationResult.evaluations) {
+      const ships = passesShippingBar(evaluation);
+      const rewrite = evaluation.rewrite.applied ? ` | rewrite=${evaluation.rewrite.score.toFixed(1)}` : '';
+      console.log(
+        `[${runId}] ${evaluation.candidateId} | ${evaluation.decision} | overall=${evaluation.overall.toFixed(1)} | ` +
+        `confidence=${evaluation.factualConfidence} | ships=${ships ? 'YES' : 'NO'}${rewrite}`,
+      );
+    }
+    return {
+      evaluations: evaluationResult.evaluations,
+      audit: responseAudit(evaluationResponse, Date.now() - startedAt),
+    };
+  } catch (error) {
+    const details = apiErrorDetails(error);
+    console.error(
+      `[${runId}] Background evaluation failed after ${Math.round((Date.now() - startedAt) / 1000)}s:`,
+      details.status || '',
+      details.message,
+    );
+    return { error: details.message };
+  }
+}
+
+async function runBackgroundWorkflow(
+  openai: OpenAI,
+  quiz: GeneratedQuiz,
+  topic: string,
+  externalRunId: string,
+  runId: string,
+  generationAudit: ResponseAudit,
+): Promise<void> {
+  const savePromise = persistGeneratedQuiz({
+    runId,
+    externalRunId,
+    topic,
+    generatorModel,
+    evaluatorModel,
+    quiz,
+    generation: generationAudit,
+  });
+  const evaluationOutcome = await evaluateQuestionsInBackground(openai, quiz.questions, externalRunId);
+  const generationSaved = await savePromise;
+  if ('error' in evaluationOutcome) {
+    if (generationSaved) await markEvaluationFailed(runId, externalRunId, evaluationOutcome.error);
+    return;
+  }
+  if (!generationSaved) {
+    console.warn(`[${externalRunId}-DB] Evaluation finished but cannot be attached because generation persistence failed.`);
+    return;
+  }
+  await persistEvaluations(
+    runId,
+    externalRunId,
+    evaluationOutcome.evaluations.map((evaluation) => ({
+      ...evaluation,
+      ships: passesShippingBar(evaluation),
+    })),
+    evaluationOutcome.audit,
+  );
+}
+
+const feedbackRateLimits = new Map<string, { count: number; resetAt: number }>();
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function feedbackRateLimitAllows(ip: string): boolean {
+  const now = Date.now();
+  const current = feedbackRateLimits.get(ip);
+  if (!current || current.resetAt <= now) {
+    feedbackRateLimits.set(ip, { count: 1, resetAt: now + 60_000 });
+    return true;
+  }
+  if (current.count >= 60) return false;
+  current.count += 1;
+  return true;
+}
+
+app.get('/api/health', (_request, response) => {
+  response.json({
+    ok: true,
+    openaiConfigured: Boolean(process.env.OPENAI_API_KEY),
+    supabaseConfigured: isSupabaseConfigured(),
+    generatorModel,
+    evaluatorModel,
+  });
+});
+
+app.put('/api/questions/:questionId/feedback', async (request, response) => {
+  const questionId = String(request.params.questionId || '').trim();
+  const sessionId = String(request.body?.sessionId || '').trim();
+  const rating = request.body?.rating;
+  if (!uuidPattern.test(questionId) || !uuidPattern.test(sessionId) || !['good', 'weak'].includes(rating)) {
+    return response.status(400).json({ error: 'Provide valid questionId, sessionId, and rating.' });
+  }
+  if (!feedbackRateLimitAllows(request.ip || 'unknown')) {
+    return response.status(429).json({ error: 'Too many feedback requests. Try again shortly.' });
+  }
+  if (!isSupabaseConfigured()) return response.status(503).json({ error: 'Feedback storage is not configured.' });
+  try {
+    await saveQuestionFeedback(questionId, sessionId, rating as 'good' | 'weak');
+    console.log(`[FEEDBACK] question=${questionId.slice(0, 8)} rating=${rating}`);
+    return response.json({ ok: true, rating });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[FEEDBACK] Save failed for question=${questionId.slice(0, 8)} | ${message}`);
+    return response.status(502).json({ error: 'Could not save feedback. Please try again.' });
+  }
+});
+
+app.post('/api/generate', async (request, response) => {
+  const topic = String(request.body?.topic || '').trim();
+  const requestedCount = Number(request.body?.count || 10);
+  const questionCount = Number.isInteger(requestedCount) && requestedCount >= 1 && requestedCount <= 10 ? requestedCount : 10;
+  if (!topic || topic.length > 100) return response.status(400).json({ error: 'Enter a topic between 1 and 100 characters.' });
+  if (!process.env.OPENAI_API_KEY) return response.status(503).json({ error: 'OpenAI is not configured. Add OPENAI_API_KEY to .env and restart the server.' });
+
+  const runId = `GEN-${Date.now().toString(36).toUpperCase()}`;
+  const startedAt = Date.now();
+  try {
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    console.log(`[${runId}] Generating ${questionCount} questions about "${topic}" with ${generatorModel}...`);
+    const result = await openai.responses.create({
+      model: generatorModel,
+      instructions: buildGeneratorPrompt(topic, questionCount),
+      input: 'Generate the requested candidates now.',
+      tools: [{ type: 'web_search' }],
+      reasoning: { effort: 'medium' },
+      text: { format: { type: 'json_schema', name: 'verified_quiz', strict: true, schema: createQuizSchema(questionCount) } },
+      max_output_tokens: 14000,
+      store: false,
+    });
+
+    const generatedQuiz = JSON.parse(result.output_text) as GeneratedQuiz;
+    const databaseRunId = randomUUID();
+    const quiz: GeneratedQuiz = {
+      ...generatedQuiz,
+      runId: databaseRunId,
+      questions: generatedQuiz.questions.map((question) => ({ ...question, questionId: randomUUID() })),
+    };
+    const generationAudit = responseAudit(result, Date.now() - startedAt);
+    console.log(`[${runId}] OpenAI completed in ${Math.round((Date.now() - startedAt) / 1000)}s (${responseStats(result)}).`);
+    for (const candidate of quiz.questions) {
+      console.log(`[${runId}] ${candidate.id} ${candidate.label} | answer="${candidate.answer.short}" | sources=${candidate.sources.length}`);
+    }
+    console.log(`[${runId}] Sending questions to the webpage now; evaluation will continue in the background.`);
+    response.json(quiz);
+    setImmediate(() => {
+      void runBackgroundWorkflow(openai, quiz, topic, runId, databaseRunId, generationAudit);
+    });
+  } catch (error) {
+    const details = apiErrorDetails(error);
+    console.error(`[${runId}] Quiz generation failed after ${Math.round((Date.now() - startedAt) / 1000)}s:`, details.status || '', details.message);
+    const message = details.status === 401 ? 'The OpenAI API key was rejected.' : 'Quiz generation failed. Please try again.';
+    response.status(details.status === 401 ? 401 : 502).json({ error: message });
+  }
+});
+
+app.post('/api/pipeline-test', async (request, response) => {
+  const topic = String(request.body?.topic || '').trim();
+  const requestedCount = Number(request.body?.candidateCount || 8);
+  const candidateCount = Number.isInteger(requestedCount) && requestedCount >= 4 && requestedCount <= 10 ? requestedCount : 8;
+  if (!topic || topic.length > 100) return response.status(400).json({ error: 'Enter a topic between 1 and 100 characters.' });
+  if (!process.env.OPENAI_API_KEY) return response.status(503).json({ error: 'OpenAI is not configured.' });
+
+  const streaming = request.query.stream === '1';
+  if (streaming) {
+    response.status(200);
+    response.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+    response.setHeader('Cache-Control', 'no-cache, no-transform');
+    response.setHeader('X-Accel-Buffering', 'no');
+    response.flushHeaders();
+  }
+
+  const runId = `PIPE-${Date.now().toString(36).toUpperCase()}`;
+  const startedAt = Date.now();
+  let currentStage = 'Starting pipeline';
+  const writeEvent = (event: Record<string, unknown>) => {
+    if (streaming) response.write(`${JSON.stringify(event)}\n`);
+  };
+  const logStage = (message: string) => {
+    currentStage = message;
+    console.log(`[${runId}] ${message}`);
+    writeEvent({ type: 'log', runId, elapsedSeconds: Math.round((Date.now() - startedAt) / 1000), message });
+  };
+  const heartbeat = streaming
+    ? setInterval(() => {
+        writeEvent({
+          type: 'heartbeat',
+          runId,
+          elapsedSeconds: Math.round((Date.now() - startedAt) / 1000),
+          stage: currentStage,
+        });
+      }, 10_000)
+    : undefined;
+
+  try {
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    logStage(`Request received | topic="${topic}" | candidates=${candidateCount}`);
+    logStage(`Models | generator=${generatorModel} | evaluator=${evaluatorModel} | reasoning=medium | web-search=enabled`);
+    const concurrency = Math.min(3, candidateCount);
+    const slots = Array.from({ length: candidateCount }, (_, index) => index);
+    let completed = 0;
+    logStage(`Hybrid pipeline started | workers=${concurrency} | each candidate is evaluated immediately after generation`);
+
+    const processed = await mapWithConcurrency(slots, concurrency, async (_slot, index) => {
+      const candidateNumber = index + 1;
+      const candidateId = `q${String(candidateNumber).padStart(2, '0')}`;
+      const assignment = candidateDirections[index % candidateDirections.length];
+      const generationStartedAt = Date.now();
+      logStage(`GEN START ${candidateId} | direction=${assignment.direction}`);
+
+      const generationResponse = await openai.responses.create({
+        model: generatorModel,
+        instructions: buildGeneratorPrompt(topic, 1),
+        input:
+          `Generate exactly one candidate for slot ${candidateNumber}. Use this assigned direction: ${assignment.direction}. ` +
+          'Keep it open-ended, inferable, source-verifiable, and avoid common quiz chestnuts.',
+        tools: [{ type: 'web_search' }],
+        reasoning: { effort: 'medium' },
+        text: { format: { type: 'json_schema', name: `candidate_${candidateId}`, strict: true, schema: createQuizSchema(1) } },
+        max_output_tokens: 6000,
+        store: false,
+      });
+      const generated = JSON.parse(generationResponse.output_text) as GeneratedQuiz;
+      const rawCandidate = generated.questions[0];
+      if (!rawCandidate) throw new Error(`Generator returned no question for ${candidateId}.`);
+      const candidate: OpenEndedQuestion = {
+        ...rawCandidate,
+        id: candidateId,
+        position: candidateNumber,
+        label: assignment.label,
+        sources: rawCandidate.sources.map((source, sourceIndex) => ({
+          ...source,
+          id: `s${String(candidateNumber).padStart(2, '0')}${String.fromCharCode(97 + sourceIndex)}`,
+        })),
+      };
+      logStage(`GEN DONE  ${candidateId} | ${Math.round((Date.now() - generationStartedAt) / 1000)}s | ${responseStats(generationResponse)}`);
+      logStage(`CANDIDATE ${candidateId} | ${candidate.label} | answer="${candidate.answer.short}" | sources=${candidate.sources.length}`);
+      logStage(`  Question: ${candidate.prompt}`);
+
+      const evaluationStartedAt = Date.now();
+      logStage(`EVAL START ${candidateId} | model=${evaluatorModel}`);
+      const evaluationResponse = await openai.responses.create({
+        model: evaluatorModel,
+        instructions: buildEvaluatorPrompt(JSON.stringify([candidate])),
+        input: 'Evaluate this candidate independently and return one structured decision now.',
+        tools: [{ type: 'web_search' }],
+        reasoning: { effort: 'medium' },
+        text: {
+          format: {
+            type: 'json_schema',
+            name: `evaluation_${candidateId}`,
+            strict: true,
+            schema: createEvaluationSchema(1),
+          },
+        },
+        max_output_tokens: 6000,
+        store: false,
+      });
+      const parsedEvaluation = JSON.parse(evaluationResponse.output_text) as EvaluationResult;
+      const rawEvaluation = parsedEvaluation.evaluations[0];
+      if (!rawEvaluation) throw new Error(`Evaluator returned no decision for ${candidateId}.`);
+      const evaluation: CandidateEvaluation = { ...rawEvaluation, candidateId };
+      const ships = passesShippingBar(evaluation);
+      const rewrite = evaluation.rewrite.applied ? ` | rewrite=${evaluation.rewrite.score.toFixed(1)}` : '';
+      logStage(`EVAL DONE  ${candidateId} | ${Math.round((Date.now() - evaluationStartedAt) / 1000)}s | ${responseStats(evaluationResponse)}`);
+      logStage(
+        `VERDICT ${candidateId} | ${evaluation.decision} | overall=${evaluation.overall.toFixed(1)} | ` +
+        `confidence=${evaluation.factualConfidence} | ships=${ships ? 'YES' : 'NO'}${rewrite}`,
+      );
+      logStage(`  Editor: ${evaluation.decisionRationale}`);
+      if (evaluation.clueLeakageIssues.length > 0) logStage(`  Leakage flags: ${evaluation.clueLeakageIssues.length}`);
+      completed += 1;
+      logStage(`PROGRESS ${completed}/${candidateCount} candidates generated and evaluated`);
+      return { candidate, evaluation };
+    });
+
+    const candidates = { questions: processed.map((item) => item.candidate).sort((a, b) => a.position - b.position) };
+    const evaluationResult: EvaluationResult = {
+      evaluations: processed.map((item) => item.evaluation).sort((a, b) => a.candidateId.localeCompare(b.candidateId)),
+    };
+    logStage(`All ${candidateCount} candidate pipelines completed in ${Math.round((Date.now() - startedAt) / 1000)}s.`);
+
+    const ranked = evaluationResult.evaluations.filter(passesShippingBar).sort((a, b) => {
+      const scoreA = a.rewrite.applied ? a.rewrite.score : a.overall;
+      const scoreB = b.rewrite.applied ? b.rewrite.score : b.overall;
+      return scoreB - scoreA;
+    });
+    const winningEvaluation = ranked[0];
+    const original = winningEvaluation
+      ? candidates.questions.find((candidate) => candidate.id === winningEvaluation.candidateId)
+      : undefined;
+    const finalist = original && winningEvaluation?.rewrite.applied
+      ? {
+          ...original,
+          context: winningEvaluation.rewrite.context,
+          prompt: winningEvaluation.rewrite.prompt,
+          answer: {
+            short: winningEvaluation.rewrite.answerShort,
+            explanation: winningEvaluation.rewrite.answerExplanation,
+          },
+        }
+      : original ?? null;
+
+    const accepted = evaluationResult.evaluations.filter((evaluation) => evaluation.decision === 'ACCEPT').length;
+    const rewritten = evaluationResult.evaluations.filter((evaluation) => evaluation.decision === 'REWRITE').length;
+    const rejected = evaluationResult.evaluations.filter((evaluation) => evaluation.decision === 'REJECT').length;
+    logStage(`3/3 Ranked results: ${accepted} accepted, ${rewritten} rewrite, ${rejected} rejected.`);
+    if (ranked.length > 0) {
+      logStage(`Shipping-bar ranking: ${ranked.map((evaluation, index) => {
+        const score = evaluation.rewrite.applied ? evaluation.rewrite.score : evaluation.overall;
+        return `${index + 1}. ${evaluation.candidateId} (${score.toFixed(1)})`;
+      }).join(' | ')}`);
+    }
+    logStage(finalist ? `Finalist: ${finalist.id} — ${finalist.answer.short}` : 'No candidate cleared the shipping bar.');
+    logStage(`Finished in ${Math.round((Date.now() - startedAt) / 1000)}s.`);
+
+    const payload = {
+      topic,
+      candidateCount,
+      models: { generator: generatorModel, evaluator: evaluatorModel },
+      candidates: candidates.questions,
+      evaluations: evaluationResult.evaluations,
+      finalist,
+    };
+    if (heartbeat) clearInterval(heartbeat);
+    if (streaming) {
+      writeEvent({ type: 'result', data: payload });
+      response.end();
+    } else {
+      response.json(payload);
+    }
+  } catch (error) {
+    if (heartbeat) clearInterval(heartbeat);
+    const details = apiErrorDetails(error);
+    console.error(`[${runId}] Pipeline failed:`, details.status || '', details.message);
+    const errorMessage = details.status === 401 ? 'The OpenAI API key was rejected.' : 'The generation/evaluation pipeline failed.';
+    if (streaming) {
+      writeEvent({ type: 'error', error: errorMessage });
+      response.end();
+    } else {
+      response.status(details.status === 401 ? 401 : 502).json({ error: errorMessage });
+    }
+  }
+});
+
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static('dist'));
+  app.get('*path', (_request, response) => response.sendFile(`${process.cwd()}/dist/index.html`));
+} else {
+  const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
+  app.use(vite.middlewares);
+}
+
+if (isSupabaseConfigured()) {
+  setImmediate(() => {
+    void syncPromptVersions().catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[SUPABASE] Prompt synchronization failed at startup | ${message}`);
+    });
+  });
+} else {
+  console.warn('[SUPABASE] Persistence disabled. Add SUPABASE_URL and SUPABASE_SECRET_KEY to .env.');
+}
+
+app.listen(port, '127.0.0.1', () => {
+  console.log(`Oddly Specific running at http://127.0.0.1:${port}`);
+});
