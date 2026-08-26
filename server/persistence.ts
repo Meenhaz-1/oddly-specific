@@ -6,10 +6,13 @@ import { getCanonicalPromptDefinitions } from './prompts';
 export interface ResponseAudit {
   responseId: string | null;
   inputTokens: number | null;
+  cachedInputTokens: number | null;
+  cacheHitRate: number | null;
   outputTokens: number | null;
   totalTokens: number | null;
   webSearchCalls: number;
   durationMs: number;
+  promptCacheKey: string;
 }
 
 export interface GeneratedQuizPersistenceInput {
@@ -173,6 +176,15 @@ export async function persistGeneratedQuiz(input: GeneratedQuizPersistenceInput)
         p_questions: input.quiz.questions,
       });
       if (result.error) throw result.error;
+      const cacheMetrics = await getAdminClient()
+        .from('quiz_runs')
+        .update({
+          generation_cached_input_tokens: input.generation.cachedInputTokens,
+          generation_cache_hit_rate: input.generation.cacheHitRate,
+          generation_prompt_cache_key: input.generation.promptCacheKey,
+        })
+        .eq('id', input.runId);
+      if (cacheMetrics.error) throw cacheMetrics.error;
     });
     console.log(`[${input.externalRunId}-DB] DB SAVE DONE | run=${input.runId}`);
     return true;
@@ -199,6 +211,15 @@ export async function persistEvaluations(
         p_evaluations: evaluations,
       });
       if (result.error) throw result.error;
+      const cacheMetrics = await getAdminClient()
+        .from('quiz_runs')
+        .update({
+          evaluation_cached_input_tokens: audit.cachedInputTokens,
+          evaluation_cache_hit_rate: audit.cacheHitRate,
+          evaluation_prompt_cache_key: audit.promptCacheKey,
+        })
+        .eq('id', runId);
+      if (cacheMetrics.error) throw cacheMetrics.error;
     });
     console.log(`[${externalRunId}-DB] EVALUATION SAVE DONE`);
     return true;

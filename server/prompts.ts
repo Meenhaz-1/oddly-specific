@@ -1,14 +1,8 @@
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 
 function loadPrompt(filename: string): string {
   return readFileSync(new URL(`../prompts/${filename}`, import.meta.url), 'utf8').trim();
-}
-
-function render(template: string, variables: Record<string, string | number>): string {
-  return Object.entries(variables).reduce(
-    (rendered, [name, value]) => rendered.replaceAll(`{{${name}}}`, String(value)),
-    template,
-  );
 }
 
 const generatorTemplate = loadPrompt('generator.md');
@@ -37,10 +31,36 @@ export function getCanonicalPromptDefinitions(): CanonicalPromptDefinition[] {
   ];
 }
 
-export function buildGeneratorPrompt(topic: string, candidateCount: number): string {
-  return render(canonicalGeneratorPrompt, { TOPIC: topic, N: candidateCount });
+export function getGeneratorInstructions(): string {
+  return canonicalGeneratorPrompt;
 }
 
-export function buildEvaluatorPrompt(candidateQuestions: string): string {
-  return render(evaluatorTemplate, { CANDIDATE_QUESTIONS: candidateQuestions });
+export function buildGeneratorInput(topic: string, candidateCount: number, request: string): string {
+  return [
+    `Topic: ${topic}`,
+    `Number of candidates: ${candidateCount}`,
+    'Do not optimize for quantity. If a candidate is weak, replace it.',
+    '',
+    request,
+  ].join('\n');
+}
+
+export function getEvaluatorInstructions(): string {
+  return evaluatorTemplate;
+}
+
+export function buildEvaluatorInput(candidateQuestions: string, request: string): string {
+  return [
+    'Candidate questions:',
+    candidateQuestions,
+    '',
+    request,
+  ].join('\n');
+}
+
+export function getPromptCacheKey(key: 'generator' | 'evaluator'): string {
+  const definition = getCanonicalPromptDefinitions().find((candidate) => candidate.key === key);
+  if (!definition) throw new Error(`Missing canonical ${key} prompt.`);
+  const version = createHash('sha256').update(definition.template, 'utf8').digest('hex').slice(0, 16);
+  return `oddly-specific-${key}-${version}`;
 }

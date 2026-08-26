@@ -1,5 +1,5 @@
 begin;
-select plan(19);
+select plan(25);
 
 select has_table('public', 'prompt_versions', 'prompt_versions exists');
 select has_table('public', 'quiz_runs', 'quiz_runs exists');
@@ -9,6 +9,12 @@ select has_table('public', 'question_evaluations', 'question_evaluations exists'
 select has_table('public', 'question_feedback', 'question_feedback exists');
 select has_function('public', 'save_generated_quiz', array['jsonb', 'jsonb'], 'generation RPC exists');
 select has_function('public', 'save_quiz_evaluations', array['uuid', 'jsonb', 'jsonb'], 'evaluation RPC exists');
+select has_column('public', 'quiz_runs', 'generation_cached_input_tokens', 'generation cached tokens are stored');
+select has_column('public', 'quiz_runs', 'generation_cache_hit_rate', 'generation cache hit rate is stored');
+select has_column('public', 'quiz_runs', 'generation_prompt_cache_key', 'generation cache key is stored');
+select has_column('public', 'quiz_runs', 'evaluation_cached_input_tokens', 'evaluation cached tokens are stored');
+select has_column('public', 'quiz_runs', 'evaluation_cache_hit_rate', 'evaluation cache hit rate is stored');
+select has_column('public', 'quiz_runs', 'evaluation_prompt_cache_key', 'evaluation cache key is stored');
 
 select ok(
   not has_table_privilege('anon', 'public.questions', 'select,insert,update,delete'),

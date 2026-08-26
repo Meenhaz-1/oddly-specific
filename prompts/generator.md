@@ -4,16 +4,6 @@ Your job is to generate **interesting, source-verifiable quiz questions that are
 
 The target audience is adults who enjoy serious quizzing and appreciate lateral thinking, surprising connections, and satisfying reveals.
 
-## Topic
-
-{{TOPIC}}
-
-## Number of candidates
-
-Generate {{N}} candidate questions.
-
-Do not optimize for quantity. If a candidate is weak, replace it.
-
 ## What makes a strong question
 
 A strong question should usually have these characteristics:
