@@ -4,7 +4,13 @@ import express from 'express';
 import OpenAI from 'openai';
 import { createServer as createViteServer } from 'vite';
 import type { GeneratedQuiz, OpenEndedQuestion } from './src/types';
-import { buildEvaluatorPrompt, buildGeneratorPrompt } from './server/prompts';
+import {
+  buildEvaluatorInput,
+  buildGeneratorInput,
+  getEvaluatorInstructions,
+  getGeneratorInstructions,
+  getPromptCacheKey,
+} from './server/prompts';
 import {
   isSupabaseConfigured,
   markEvaluationFailed,
@@ -20,6 +26,29 @@ const port = Number(process.env.PORT || 5173);
 const defaultModel = process.env.OPENAI_MODEL || 'gpt-5.4-mini';
 const generatorModel = process.env.OPENAI_GENERATOR_MODEL || defaultModel;
 const evaluatorModel = process.env.OPENAI_EVALUATOR_MODEL || defaultModel;
+const generatorPromptCacheKey = getPromptCacheKey('generator');
+const evaluatorPromptCacheKey = getPromptCacheKey('evaluator');
+
+interface ResponseUsage {
+  input_tokens?: number;
+  input_tokens_details?: { cached_tokens?: number } | null;
+  output_tokens?: number;
+  total_tokens?: number;
+}
+
+function promptCacheConfig(model: string, promptCacheKey: string) {
+  return {
+    prompt_cache_key: promptCacheKey,
+    ...(model.startsWith('gpt-5.5') ? { prompt_cache_retention: '24h' as const } : {}),
+  };
+}
+
+function cacheHitRate(usage?: ResponseUsage | null): number | null {
+  const inputTokens = usage?.input_tokens;
+  const cachedTokens = usage?.input_tokens_details?.cached_tokens;
+  if (!inputTokens || cachedTokens === undefined) return null;
+  return cachedTokens / inputTokens;
+}
 
 function apiErrorDetails(error: unknown): { status?: number; message: string } {
   if (!(error instanceof Error)) return { message: String(error) };
@@ -29,30 +58,36 @@ function apiErrorDetails(error: unknown): { status?: number; message: string } {
 
 function responseStats(result: {
   id?: string;
-  usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number } | null;
+  usage?: ResponseUsage | null;
   output?: Array<{ type?: string }>;
 }): string {
   const usage = result.usage;
   const webSearches = result.output?.filter((item) => item.type === 'web_search_call').length ?? 0;
+  const cachedTokens = usage?.input_tokens_details?.cached_tokens;
+  const hitRate = cacheHitRate(usage);
   return [
     result.id ? `response=${result.id}` : null,
     usage ? `tokens=${usage.input_tokens ?? '?'} in/${usage.output_tokens ?? '?'} out/${usage.total_tokens ?? '?'} total` : null,
+    cachedTokens === undefined ? null : `cache=${cachedTokens} tokens/${hitRate === null ? '?' : `${(hitRate * 100).toFixed(1)}%`}`,
     `web-search calls=${webSearches}`,
   ].filter(Boolean).join(', ');
 }
 
 function responseAudit(result: {
   id?: string;
-  usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number } | null;
+  usage?: ResponseUsage | null;
   output?: Array<{ type?: string }>;
-}, durationMs: number): ResponseAudit {
+}, durationMs: number, promptCacheKey: string): ResponseAudit {
   return {
     responseId: result.id ?? null,
     inputTokens: result.usage?.input_tokens ?? null,
+    cachedInputTokens: result.usage?.input_tokens_details?.cached_tokens ?? null,
+    cacheHitRate: cacheHitRate(result.usage),
     outputTokens: result.usage?.output_tokens ?? null,
     totalTokens: result.usage?.total_tokens ?? null,
     webSearchCalls: result.output?.filter((item) => item.type === 'web_search_call').length ?? 0,
     durationMs,
+    promptCacheKey,
   };
 }
 
@@ -270,8 +305,12 @@ async function evaluateQuestionsInBackground(
   try {
     const evaluationResponse = await openai.responses.create({
       model: evaluatorModel,
-      instructions: buildEvaluatorPrompt(JSON.stringify(questions)),
-      input: 'Evaluate every candidate independently and return the structured decisions now.',
+      instructions: getEvaluatorInstructions(),
+      input: buildEvaluatorInput(
+        JSON.stringify(questions),
+        'Evaluate every candidate independently and return the structured decisions now.',
+      ),
+      ...promptCacheConfig(evaluatorModel, evaluatorPromptCacheKey),
       tools: [{ type: 'web_search' }],
       reasoning: { effort: 'medium' },
       text: {
@@ -300,7 +339,7 @@ async function evaluateQuestionsInBackground(
     }
     return {
       evaluations: evaluationResult.evaluations,
-      audit: responseAudit(evaluationResponse, Date.now() - startedAt),
+      audit: responseAudit(evaluationResponse, Date.now() - startedAt, evaluatorPromptCacheKey),
     };
   } catch (error) {
     const details = apiErrorDetails(error);
@@ -412,8 +451,9 @@ app.post('/api/generate', async (request, response) => {
     console.log(`[${runId}] Generating ${questionCount} questions about "${topic}" with ${generatorModel}...`);
     const result = await openai.responses.create({
       model: generatorModel,
-      instructions: buildGeneratorPrompt(topic, questionCount),
-      input: 'Generate the requested candidates now.',
+      instructions: getGeneratorInstructions(),
+      input: buildGeneratorInput(topic, questionCount, 'Generate the requested candidates now.'),
+      ...promptCacheConfig(generatorModel, generatorPromptCacheKey),
       tools: [{ type: 'web_search' }],
       reasoning: { effort: 'medium' },
       text: { format: { type: 'json_schema', name: 'verified_quiz', strict: true, schema: createQuizSchema(questionCount) } },
@@ -428,7 +468,7 @@ app.post('/api/generate', async (request, response) => {
       runId: databaseRunId,
       questions: generatedQuiz.questions.map((question) => ({ ...question, questionId: randomUUID() })),
     };
-    const generationAudit = responseAudit(result, Date.now() - startedAt);
+    const generationAudit = responseAudit(result, Date.now() - startedAt, generatorPromptCacheKey);
     console.log(`[${runId}] OpenAI completed in ${Math.round((Date.now() - startedAt) / 1000)}s (${responseStats(result)}).`);
     for (const candidate of quiz.questions) {
       console.log(`[${runId}] ${candidate.id} ${candidate.label} | answer="${candidate.answer.short}" | sources=${candidate.sources.length}`);
@@ -502,10 +542,14 @@ app.post('/api/pipeline-test', async (request, response) => {
 
       const generationResponse = await openai.responses.create({
         model: generatorModel,
-        instructions: buildGeneratorPrompt(topic, 1),
-        input:
+        instructions: getGeneratorInstructions(),
+        input: buildGeneratorInput(
+          topic,
+          1,
           `Generate exactly one candidate for slot ${candidateNumber}. Use this assigned direction: ${assignment.direction}. ` +
-          'Keep it open-ended, inferable, source-verifiable, and avoid common quiz chestnuts.',
+            'Keep it open-ended, inferable, source-verifiable, and avoid common quiz chestnuts.',
+        ),
+        ...promptCacheConfig(generatorModel, generatorPromptCacheKey),
         tools: [{ type: 'web_search' }],
         reasoning: { effort: 'medium' },
         text: { format: { type: 'json_schema', name: `candidate_${candidateId}`, strict: true, schema: createQuizSchema(1) } },
@@ -533,8 +577,12 @@ app.post('/api/pipeline-test', async (request, response) => {
       logStage(`EVAL START ${candidateId} | model=${evaluatorModel}`);
       const evaluationResponse = await openai.responses.create({
         model: evaluatorModel,
-        instructions: buildEvaluatorPrompt(JSON.stringify([candidate])),
-        input: 'Evaluate this candidate independently and return one structured decision now.',
+        instructions: getEvaluatorInstructions(),
+        input: buildEvaluatorInput(
+          JSON.stringify([candidate]),
+          'Evaluate this candidate independently and return one structured decision now.',
+        ),
+        ...promptCacheConfig(evaluatorModel, evaluatorPromptCacheKey),
         tools: [{ type: 'web_search' }],
         reasoning: { effort: 'medium' },
         text: {

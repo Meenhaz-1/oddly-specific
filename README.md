@@ -57,7 +57,7 @@ npm run db:reset
 npm run db:test
 ```
 
-For hosted deployment, connect the private GitHub repository in Supabase under
+For hosted deployment, connect the GitHub repository in Supabase under
 **Project Settings → Integrations → GitHub**, use `.` as the working directory,
 select `main` as production, and enable **Deploy to production**. Migrations
 merged to `main` are then applied automatically.
@@ -67,6 +67,12 @@ evaluation finish. The backend saves the run, sources, immutable prompt
 versions, evaluator decisions, and question-level Good/Weak feedback in the
 background. If Supabase is unavailable, the quiz remains playable and the
 terminal reports the failed write.
+
+Generator and evaluator requests keep their canonical instructions stable and
+put topic/question data in the final user input. Each prompt version derives a
+stable `prompt_cache_key`; GPT-5.5 requests opt into 24-hour retention. Terminal
+logs and `quiz_runs` record cached input tokens and cache-hit rates so caching
+can be measured rather than assumed.
 
 ## Structure
 

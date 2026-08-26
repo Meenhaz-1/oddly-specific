@@ -8,10 +8,6 @@ You are not trying to preserve every question.
 
 It is better to reject 70% of candidates than to let mediocre questions through.
 
-## Input
-
-{{CANDIDATE_QUESTIONS}}
-
 ## Evaluate each question independently
 
 Score each dimension from 1 to 5.
