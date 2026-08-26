@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
 import OpenAI from 'openai';
+import type { ResponseCreateParamsNonStreaming } from 'openai/resources/responses/responses';
 import { createServer as createViteServer } from 'vite';
 import type { GeneratedQuiz, OpenEndedQuestion } from './src/types';
 import {
@@ -23,6 +24,15 @@ import {
 
 const app = express();
 const port = Number(process.env.PORT || 5173);
+
+type ResponseCreateParamsWithToolLimit = ResponseCreateParamsNonStreaming & { max_tool_calls: number };
+
+function withToolCallLimit(
+  params: ResponseCreateParamsNonStreaming,
+  maxToolCalls: number,
+): ResponseCreateParamsWithToolLimit {
+  return { ...params, max_tool_calls: maxToolCalls };
+}
 const defaultModel = process.env.OPENAI_MODEL || 'gpt-5.4-mini';
 const generatorModel = process.env.OPENAI_GENERATOR_MODEL || defaultModel;
 const evaluatorModel = process.env.OPENAI_EVALUATOR_MODEL || defaultModel;
@@ -301,9 +311,13 @@ async function evaluateQuestionsInBackground(
 ): Promise<{ evaluations: CandidateEvaluation[]; audit: ResponseAudit } | { error: string }> {
   const runId = `${parentRunId}-EVAL`;
   const startedAt = Date.now();
-  console.log(`[${runId}] Background evaluation started for ${questions.length} questions with ${evaluatorModel}.`);
+  const maxWebSearchCalls = Math.min(2, Math.max(1, questions.length));
+  console.log(
+    `[${runId}] Background evaluation started for ${questions.length} questions with ${evaluatorModel} ` +
+    `(web search required, max calls=${maxWebSearchCalls}).`,
+  );
   try {
-    const evaluationResponse = await openai.responses.create({
+    const evaluationResponse = await openai.responses.create(withToolCallLimit({
       model: evaluatorModel,
       instructions: getEvaluatorInstructions(),
       input: buildEvaluatorInput(
@@ -312,6 +326,7 @@ async function evaluateQuestionsInBackground(
       ),
       ...promptCacheConfig(evaluatorModel, evaluatorPromptCacheKey),
       tools: [{ type: 'web_search' }],
+      tool_choice: 'required',
       reasoning: { effort: 'medium' },
       text: {
         format: {
@@ -323,7 +338,7 @@ async function evaluateQuestionsInBackground(
       },
       max_output_tokens: 18000,
       store: false,
-    });
+    }, maxWebSearchCalls));
     const evaluationResult = JSON.parse(evaluationResponse.output_text) as EvaluationResult;
     console.log(
       `[${runId}] Background evaluation completed in ${Math.round((Date.now() - startedAt) / 1000)}s ` +
@@ -574,8 +589,8 @@ app.post('/api/pipeline-test', async (request, response) => {
       logStage(`  Question: ${candidate.prompt}`);
 
       const evaluationStartedAt = Date.now();
-      logStage(`EVAL START ${candidateId} | model=${evaluatorModel}`);
-      const evaluationResponse = await openai.responses.create({
+      logStage(`EVAL START ${candidateId} | model=${evaluatorModel} | web search required, max calls=1`);
+      const evaluationResponse = await openai.responses.create(withToolCallLimit({
         model: evaluatorModel,
         instructions: getEvaluatorInstructions(),
         input: buildEvaluatorInput(
@@ -584,6 +599,7 @@ app.post('/api/pipeline-test', async (request, response) => {
         ),
         ...promptCacheConfig(evaluatorModel, evaluatorPromptCacheKey),
         tools: [{ type: 'web_search' }],
+        tool_choice: 'required',
         reasoning: { effort: 'medium' },
         text: {
           format: {
@@ -595,7 +611,7 @@ app.post('/api/pipeline-test', async (request, response) => {
         },
         max_output_tokens: 6000,
         store: false,
-      });
+      }, 1));
       const parsedEvaluation = JSON.parse(evaluationResponse.output_text) as EvaluationResult;
       const rawEvaluation = parsedEvaluation.evaluations[0];
       if (!rawEvaluation) throw new Error(`Evaluator returned no decision for ${candidateId}.`);

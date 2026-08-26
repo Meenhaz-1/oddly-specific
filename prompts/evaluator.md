@@ -19,8 +19,8 @@ Ask:
 Can a player who does not already know the fact make progress from the clues?
 
 **1:** Pure recall or basically impossible  
-**3:** Some route exists, but weak  
-**5:** Strong inferential route, ideally multiple clue paths
+**3:** Some route exists, or recall is partly required but clues narrow the answer meaningfully
+**5:** Strong inferential route with well-chosen evidence; multiple clue paths are welcome but not required
 
 ### 2. Reveal quality
 
@@ -68,6 +68,8 @@ Is there exactly one clearly defensible answer?
 
 List the three strongest alternative answers.
 
+A plausible guess is not automatically a valid alternative. It is disqualifying only when it satisfies the exact wording at least as well as the intended answer.
+
 **1:** Multiple valid answers  
 **3:** Intended answer is likely but wording is loose  
 **5:** Clearly unique
@@ -104,8 +106,12 @@ Immediately reject the question if any of these are true:
 - multiple answers fully satisfy the stem
 - answer is effectively stated in the question
 - visual is missing, inaccessible, or unrelated
-- question is pure obscure recall
+- question is pure obscure recall with no compensating route or reveal
 - question is an overused chestnut with no new angle
+
+## Mandatory source verification
+
+Use web search before evaluating any candidate. Verify at least one authoritative source for every candidate, including that the cited source supports the material premise. Do not rely only on source titles, URLs, or metadata supplied by the generator. Do not return a decision until this verification is complete.
 
 ## Clue leakage audit
 
@@ -150,7 +156,7 @@ Return exactly one of:
 Use only if:
 
 - average score is at least 4.0
-- Solvability ≥ 4
+- Solvability ≥ 3
 - Reveal Quality ≥ 4
 - Clue Discipline ≥ 4
 - Answer Precision ≥ 4
@@ -181,7 +187,7 @@ Use when:
 - fact is too common
 - premise is weak
 - answer is ambiguous
-- question depends on trivia recall
+- question depends entirely on obscure recall and offers no compensating reveal or inferential route
 - reveal is flat
 - factual support is shaky
 - rewriting would not materially improve it
