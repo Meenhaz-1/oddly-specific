@@ -8,6 +8,7 @@ import Making from './components/Making';
 import QuizIntro from './components/QuizIntro';
 import Done from './components/Done';
 import Viewer from './components/Viewer';
+import { Analytics } from '@vercel/analytics/react';
 
 export default function App() {
   const { state, question, bank, actions } = useQuizEngine();
@@ -45,6 +46,7 @@ export default function App() {
       {state.viewer && (
         <Viewer alt={question.imgAlt ?? 'Quiz image'} src={question.imgSrc} onClose={actions.closeViewer} />
       )}
+      <Analytics />
     </div>
   );
 }
