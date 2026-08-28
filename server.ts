@@ -2,9 +2,9 @@ import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
 import OpenAI from 'openai';
+import { waitUntil } from '@vercel/functions';
 import type { InputTokenCountParams } from 'openai/resources/responses/input-tokens';
 import type { ResponseCreateParamsNonStreaming } from 'openai/resources/responses/responses';
-import { createServer as createViteServer } from 'vite';
 import type { GeneratedQuiz, OpenEndedQuestion } from './src/types';
 import {
   buildEvaluatorInput,
@@ -12,7 +12,7 @@ import {
   getEvaluatorInstructions,
   getGeneratorInstructions,
   getPromptCacheKey,
-} from './server/prompts';
+} from './server/prompts.js';
 import {
   fetchRandomArchiveQuiz,
   isSupabaseConfigured,
@@ -22,7 +22,7 @@ import {
   saveQuestionFeedback,
   syncPromptVersions,
   type ResponseAudit,
-} from './server/persistence';
+} from './server/persistence.js';
 
 const app = express();
 const port = Number(process.env.PORT || 5173);
@@ -40,6 +40,15 @@ const generatorModel = process.env.OPENAI_GENERATOR_MODEL || defaultModel;
 const evaluatorModel = process.env.OPENAI_EVALUATOR_MODEL || defaultModel;
 const generatorPromptCacheKey = getPromptCacheKey('generator');
 const evaluatorPromptCacheKey = getPromptCacheKey('evaluator');
+
+function continueAfterResponse(task: Promise<void>): void {
+  if (process.env.VERCEL) {
+    // Keep evaluation and persistence alive after the serverless response is sent.
+    waitUntil(task);
+    return;
+  }
+  void task;
+}
 
 interface ResponseUsage {
   input_tokens?: number;
@@ -577,9 +586,7 @@ app.post('/api/generate', async (request, response) => {
     }
     console.log(`[${runId}] Sending questions to the webpage now; evaluation will continue in the background.`);
     response.json(quiz);
-    setImmediate(() => {
-      void runBackgroundWorkflow(openai, quiz, topic, runId, databaseRunId, generationAudit);
-    });
+    continueAfterResponse(runBackgroundWorkflow(openai, quiz, topic, runId, databaseRunId, generationAudit));
   } catch (error) {
     const details = apiErrorDetails(error);
     console.error(`[${runId}] Quiz generation failed after ${Math.round((Date.now() - startedAt) / 1000)}s:`, details.status || '', details.message);
@@ -589,6 +596,9 @@ app.post('/api/generate', async (request, response) => {
 });
 
 app.post('/api/pipeline-test', async (request, response) => {
+  if (process.env.NODE_ENV === 'production' || process.env.VERCEL) {
+    return response.status(404).json({ error: 'Not found.' });
+  }
   const topic = String(request.body?.topic || '').trim();
   const requestedCount = Number(request.body?.candidateCount || 8);
   const candidateCount = Number.isInteger(requestedCount) && requestedCount >= 4 && requestedCount <= 10 ? requestedCount : 8;
@@ -786,25 +796,32 @@ app.post('/api/pipeline-test', async (request, response) => {
   }
 });
 
-if (process.env.NODE_ENV === 'production') {
-  app.use(express.static('dist'));
-  app.get('*path', (_request, response) => response.sendFile(`${process.cwd()}/dist/index.html`));
-} else {
-  const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
-  app.use(vite.middlewares);
-}
+export default app;
 
-if (isSupabaseConfigured()) {
-  setImmediate(() => {
-    void syncPromptVersions().catch((error: unknown) => {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(`[SUPABASE] Prompt synchronization failed at startup | ${message}`);
+// Vercel imports the Express app as a function. The local process alone owns
+// Vite middleware, static files, startup synchronization, and the TCP listener.
+if (!process.env.VERCEL) {
+  if (process.env.NODE_ENV === 'production') {
+    app.use(express.static('dist'));
+    app.get('*path', (_request, response) => response.sendFile(`${process.cwd()}/dist/index.html`));
+  } else {
+    const { createServer: createViteServer } = await import('vite');
+    const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
+    app.use(vite.middlewares);
+  }
+
+  if (isSupabaseConfigured()) {
+    setImmediate(() => {
+      void syncPromptVersions().catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`[SUPABASE] Prompt synchronization failed at startup | ${message}`);
+      });
     });
-  });
-} else {
-  console.warn('[SUPABASE] Persistence disabled. Add SUPABASE_URL and SUPABASE_SECRET_KEY to .env.');
-}
+  } else {
+    console.warn('[SUPABASE] Persistence disabled. Add SUPABASE_URL and SUPABASE_SECRET_KEY to .env.');
+  }
 
-app.listen(port, '127.0.0.1', () => {
-  console.log(`Oddly Specific running at http://127.0.0.1:${port}`);
-});
+  app.listen(port, '127.0.0.1', () => {
+    console.log(`Oddly Specific running at http://127.0.0.1:${port}`);
+  });
+}
