@@ -164,16 +164,20 @@ export const QUESTION_BANK: QuizQuestion[] = [
   },
 ];
 
-export const SAMPLE_QUESTION: Pick<QuizQuestion, 'setup' | 'imgAlt' | 'imgSrc' | 'answer' | 'explain'> = {
-  setup:
-    'This looks like an overgrown hedge somewhere in rural India. In the 19th century, however, versions of this barrier ran for thousands of kilometres, were patrolled by thousands of men, and in places were deliberately grown thick enough to be difficult to cross. It was not built as a military frontier, and it was not intended to keep animals out. Give funda: what was the British government trying to stop people from carrying across this hedge, and why was a physical barrier economically worth building at this scale?',
-  imgAlt: 'A reconstruction of the colonial-era Inland Customs Line hedge in India',
-  imgSrc:
-    'https://akm-img-a-in.tosshub.com/indiatoday/images/story/202602/salt-lines-181246700-16x9_0.jpg?VersionId=.pkc_MRyRohO7EJ8jor5AVRPxRX2mdvm',
-  answer: 'Salt — to enforce the colonial salt tax',
-  explain:
-    'The Inland Customs Line was designed to stop untaxed salt moving between regions with different duties. Salt taxes produced so much colonial revenue that maintaining a vast staffed barrier was economically worthwhile.',
-};
+// Short, self-contained teaser lines for the landing page's rotating strip.
+// Each one paraphrases a real, sourced question from QUESTION_BANK down to a
+// single standalone sentence (no setup context needed, no answer given away)
+// — nothing here is invented; keep these in sync if the bank above changes.
+export const LANDING_TEASERS: string[] = [
+  "What was Britain's thousands-of-kilometre hedge across colonial India actually built to stop people carrying?",
+  'At which Olympic Games did India win its first field hockey gold medal?',
+  'In 1957, two engineers accidentally invented something huge, for a completely different reason. What were they trying to make?',
+  'Before the 1950s, cargo moved in sacks, barrels and crates of every shape. What one invention changed global trade?',
+  'A 19th-century warehouse in Madras stored a commodity shipped 12,000km from New England. What was inside?',
+  "Before decimal currency, one rupee was sixteen annas. So what does 'solah anna' mean?",
+  'What common kitchen appliance was invented after someone heard how Jewish families cooked Sabbath dinners overnight?',
+  "Long before cowboys, this patterned cloth reached Europe from India. What's it called today?",
+];
 
 export const TOPICS: QuizTopic[] = [
   { name: 'Indian sport', count: 'NEW', tab: '#E4D9B8' },

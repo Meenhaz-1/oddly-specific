@@ -172,14 +172,6 @@
   box-shadow: 3px 4px 0 rgba(27, 26, 23, 0.05);
 }
 
-.quiz__blank-lead {
-  font-family: var(--font-serif);
-  font-size: 19px;
-  line-height: 1.5;
-  margin: 0 0 6px;
-  color: var(--body-text);
-}
-
 .quiz__blank-line {
   font-family: var(--font-serif);
   font-size: clamp(26px, 7vw, 34px);

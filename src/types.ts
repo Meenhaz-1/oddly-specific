@@ -79,7 +79,7 @@ export type QuizScreen = 'landing' | 'making' | 'intro' | 'quiz' | 'done';
 export type QuizMode = 'generated' | 'random';
 export type RevealStage = 0 | 1 | 2;
 export type Vote = 'up' | 'down' | null;
-export type ViewerTarget = 'sample' | 'question' | null;
+export type ViewerTarget = 'question' | null;
 export type SeenState = 'revealed' | 'skipped';
 
 export interface QuizState {
@@ -88,8 +88,6 @@ export interface QuizState {
   menu: boolean;
   topic: string;
   other: string;
-  sample: RevealStage;
-  sampleRoll: boolean;
   qi: number;
   stage: RevealStage;
   roll: boolean;
@@ -122,8 +120,6 @@ export interface QuizActions {
   startPlay: () => void;
   relatedTopic: () => void;
   share: () => Promise<void>;
-  revealSample: () => void;
-  openSampleViewer: () => void;
   revealAnswer: () => void;
   nextClue: () => void;
   pickChoice: (key: string) => void;

@@ -1,5 +1,6 @@
 import './QuizIntro.css';
 import type { QuizActions, QuizMode } from '../types';
+import { BorderTrail } from './motion-primitives/BorderTrail';
 
 interface QuizIntroProps {
   topic: string;
@@ -25,6 +26,15 @@ export default function QuizIntro({ topic, teaser, questionTotal, quizMode, acti
         <span>No score. No timer. Take your time with each one.</span>
       </div>
       <button className="btn btn--forest quiz-intro__start" onClick={actions.startPlay}>
+        <BorderTrail
+          size={128}
+          thickness={18}
+          transition={{ repeat: Infinity, duration: 10, ease: 'linear' }}
+          style={{
+            background:
+              'radial-gradient(ellipse at center, rgb(213 229 221 / 92%) 0%, rgb(174 203 189 / 72%) 28%, rgb(126 166 147 / 30%) 54%, transparent 78%)',
+          }}
+        />
         <span>Start quiz</span>
         <span className="btn__arrow">&rarr;</span>
       </button>

@@ -44,7 +44,18 @@
   transform: rotate(-2deg);
 }
 
-.quiz-intro__start { margin-top: 30px; }
+.quiz-intro__start {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  margin-top: 30px;
+  border-color: rgb(237 243 239 / 18%);
+}
+
+.quiz-intro__start > :not(.border-trail) {
+  position: relative;
+  z-index: 2;
+}
 
 .quiz-intro__change {
   display: block;
