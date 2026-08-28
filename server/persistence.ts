@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { GeneratedQuiz, OpenEndedQuestion, RandomQuizResponse } from '../src/types';
-import { getCanonicalPromptDefinitions } from './prompts';
+import { getCanonicalPromptDefinitions } from './prompts.js';
 
 export interface ResponseAudit {
   responseId: string | null;
