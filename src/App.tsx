@@ -44,7 +44,11 @@ export default function App() {
       </div>
 
       {state.viewer && (
-        <Viewer alt={(state.viewer === 'sample' ? SAMPLE_QUESTION.imgAlt : question.imgAlt) ?? 'Quiz image'} onClose={actions.closeViewer} />
+        <Viewer
+          alt={(state.viewer === 'sample' ? SAMPLE_QUESTION.imgAlt : question.imgAlt) ?? 'Quiz image'}
+          src={state.viewer === 'sample' ? SAMPLE_QUESTION.imgSrc : question.imgSrc}
+          onClose={actions.closeViewer}
+        />
       )}
     </div>
   );

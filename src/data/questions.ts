@@ -164,12 +164,15 @@ export const QUESTION_BANK: QuizQuestion[] = [
   },
 ];
 
-export const SAMPLE_QUESTION: Pick<QuizQuestion, 'setup' | 'imgAlt' | 'answer' | 'explain'> = {
-  setup: 'Which Indian athlete was the first to win an individual Olympic gold medal?',
-  imgAlt: 'archival photo — shooter at the Olympic ten-metre range',
-  answer: 'Abhinav Bindra, 2008',
+export const SAMPLE_QUESTION: Pick<QuizQuestion, 'setup' | 'imgAlt' | 'imgSrc' | 'answer' | 'explain'> = {
+  setup:
+    'This looks like an overgrown hedge somewhere in rural India. In the 19th century, however, versions of this barrier ran for thousands of kilometres, were patrolled by thousands of men, and in places were deliberately grown thick enough to be difficult to cross. It was not built as a military frontier, and it was not intended to keep animals out. Give funda: what was the British government trying to stop people from carrying across this hedge, and why was a physical barrier economically worth building at this scale?',
+  imgAlt: 'A reconstruction of the colonial-era Inland Customs Line hedge in India',
+  imgSrc:
+    'https://akm-img-a-in.tosshub.com/indiatoday/images/story/202602/salt-lines-181246700-16x9_0.jpg?VersionId=.pkc_MRyRohO7EJ8jor5AVRPxRX2mdvm',
+  answer: 'Salt — to enforce the colonial salt tax',
   explain:
-    "He won the 10m air rifle in Beijing — India's first individual gold in 112 years of the modern Games.",
+    'The Inland Customs Line was designed to stop untaxed salt moving between regions with different duties. Salt taxes produced so much colonial revenue that maintaining a vast staffed barrier was economically worthwhile.',
 };
 
 export const TOPICS: QuizTopic[] = [

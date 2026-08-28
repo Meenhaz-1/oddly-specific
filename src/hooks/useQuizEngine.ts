@@ -12,6 +12,9 @@ export const EXPECTED_GENERATION_MS = 45_000;
 const STORAGE_KEY = 'oddly-specific-progress-v1';
 const FEEDBACK_SESSION_KEY = 'oddly-specific-feedback-session-v1';
 const RANDOM_SEEN_SESSION_KEY = 'oddly-specific-random-seen-v1';
+const HOME_PATH = '/';
+const QUIZ_PATH = '/quiz';
+const COMPLETE_PATH = '/quiz/complete';
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const initialState: QuizState = {
@@ -144,12 +147,23 @@ function getInitialState(): QuizState {
     return { ...initialState, screen: 'intro', topic: params.get('topic') || initialState.topic };
   }
 
+  const path = window.location.pathname.replace(/\/+$/, '') || HOME_PATH;
+  if (path === HOME_PATH) {
+    window.localStorage.removeItem(STORAGE_KEY);
+    return initialState;
+  }
+
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return initialState;
     const saved = JSON.parse(raw) as Partial<QuizState>;
     if (!saved.screen || !['intro', 'quiz', 'done'].includes(saved.screen)) return initialState;
-    return { ...initialState, ...saved, roll: false, slide: 0, viewer: null };
+    const restored = { ...initialState, ...saved, roll: false, slide: 0 as const, viewer: null };
+    if (path === COMPLETE_PATH) return { ...restored, screen: 'done' };
+    if (path === QUIZ_PATH) {
+      return restored.screen === 'done' ? { ...restored, screen: 'quiz', stage: 2 } : restored;
+    }
+    return initialState;
   } catch {
     return initialState;
   }
@@ -172,6 +186,19 @@ export function useQuizEngine() {
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
 
   useEffect(() => {
+    const restoreFromRoute = () => {
+      const restored = getInitialState();
+      if (restored.screen === 'landing' && window.location.pathname !== HOME_PATH) {
+        window.history.replaceState({}, '', HOME_PATH);
+      }
+      setState(restored);
+    };
+    restoreFromRoute();
+    window.addEventListener('popstate', restoreFromRoute);
+    return () => window.removeEventListener('popstate', restoreFromRoute);
+  }, []);
+
+  useEffect(() => {
     if (!['intro', 'quiz', 'done'].includes(state.screen)) return;
     const { viewer: _viewer, roll: _roll, slide: _slide, shareStatus: _shareStatus, ...persisted } = state;
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted));
@@ -190,6 +217,11 @@ export function useQuizEngine() {
     setState((s) => ({ ...s, ...(typeof fields === 'function' ? fields(s) : fields) }));
   }, []);
 
+  const navigate = useCallback((path: string, replace = false) => {
+    if (`${window.location.pathname}${window.location.search}` === path) return;
+    window.history[replace ? 'replaceState' : 'pushState']({}, '', path);
+  }, []);
+
   const bank = state.questions?.length ? state.questions : QUESTION_BANK;
   const question = bank[state.qi]!;
 
@@ -206,6 +238,8 @@ export function useQuizEngine() {
   };
 
   const begin = async (topic: string): Promise<void> => {
+    window.localStorage.removeItem(STORAGE_KEY);
+    navigate(HOME_PATH);
     patch({
       screen: 'making',
       quizMode: 'generated',
@@ -240,6 +274,7 @@ export function useQuizEngine() {
       if (!isGeneratedQuiz(result)) throw new Error('The generated set was incomplete or malformed.');
       const questions = toQuizQuestions(result.questions);
       patch({ questions, teaser: result.teaser, screen: 'intro' });
+      navigate(QUIZ_PATH);
       window.scrollTo(0, 0);
     } catch (error) {
       patch({ generationError: errorMessage(error) });
@@ -247,8 +282,10 @@ export function useQuizEngine() {
   };
 
   const beginRandom = async (): Promise<void> => {
+    window.localStorage.removeItem(STORAGE_KEY);
     const excludedIds = getRandomSeenIds();
     patch({ screen: 'landing', menu: false, randomLoading: true, randomError: '', shareStatus: '' });
+    navigate(HOME_PATH);
     window.scrollTo(0, 0);
     try {
       const apiResponse = await fetch('/api/random-quiz', {
@@ -287,6 +324,7 @@ export function useQuizEngine() {
         randomLoading: false,
         randomError: '',
       });
+      navigate(QUIZ_PATH);
       window.scrollTo(0, 0);
     } catch (error) {
       patch({ screen: 'landing', randomLoading: false, randomError: errorMessage(error) });
@@ -297,6 +335,7 @@ export function useQuizEngine() {
     const seen: Record<number, SeenState> = { ...state.seen, [state.qi]: state.stage >= 1 ? 'revealed' : 'skipped' };
     if (state.qi >= bank.length - 1) {
       patch({ seen, screen: 'done' });
+      navigate(COMPLETE_PATH);
       window.scrollTo(0, 0);
       return;
     }
@@ -320,7 +359,9 @@ export function useQuizEngine() {
 
   const back = () => {
     if (state.qi === 0) {
+      window.localStorage.removeItem(STORAGE_KEY);
       patch({ screen: 'landing' });
+      navigate(HOME_PATH);
       return;
     }
     patch({ slide: 1 });
@@ -357,7 +398,11 @@ export function useQuizEngine() {
   };
 
   const actions: QuizActions = {
-    goHome: () => patch({ screen: 'landing', menu: false, shareStatus: '' }),
+    goHome: () => {
+      window.localStorage.removeItem(STORAGE_KEY);
+      patch({ screen: 'landing', menu: false, shareStatus: '' });
+      navigate(HOME_PATH);
+    },
     toggleMenu: () => patch((s) => ({ menu: !s.menu })),
     setOther: (value) => patch({ other: value }),
     startQuiz: () => begin(state.other.trim() || (state.quizMode === 'random' ? initialState.topic : state.topic)),
@@ -366,6 +411,7 @@ export function useQuizEngine() {
     newTopic: () => {
       window.localStorage.removeItem(STORAGE_KEY);
       patch({ ...initialState, topic: state.quizMode === 'random' ? initialState.topic : state.topic });
+      navigate(HOME_PATH);
       window.scrollTo(0, 0);
     },
     retryGeneration: () => begin(state.topic),
@@ -374,6 +420,7 @@ export function useQuizEngine() {
     },
     startPlay: () => {
       patch({ screen: 'quiz', slide: 1 });
+      navigate(QUIZ_PATH);
       window.scrollTo(0, 0);
       nextFrame(() => patch({ slide: 0 }));
     },

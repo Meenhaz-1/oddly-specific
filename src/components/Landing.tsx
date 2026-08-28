@@ -48,7 +48,7 @@ export default function Landing({ state, actions }: LandingProps) {
           <p className="sample__question">{SAMPLE_QUESTION.setup}</p>
 
           <div className="sample__image" onClick={actions.openSampleViewer}>
-            <ImagePlaceholder alt={SAMPLE_QUESTION.imgAlt ?? 'Sample question image'} />
+            <ImagePlaceholder alt={SAMPLE_QUESTION.imgAlt ?? 'Sample question image'} src={SAMPLE_QUESTION.imgSrc} />
             <div className="sample__tape" />
           </div>
 

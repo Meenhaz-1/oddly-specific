@@ -9,22 +9,27 @@ import type { MouseEventHandler } from 'react';
  */
 interface ImagePlaceholderProps {
   alt: string;
+  src?: string;
   onClick?: MouseEventHandler<HTMLDivElement>;
   className?: string;
 }
 
-export default function ImagePlaceholder({ alt, onClick, className = '' }: ImagePlaceholderProps) {
+export default function ImagePlaceholder({ alt, src, onClick, className = '' }: ImagePlaceholderProps) {
   return (
     <div
-      className={`img-slot ${className}`.trim()}
+      className={`img-slot ${src ? 'img-slot--image' : ''} ${className}`.trim()}
       onClick={onClick}
       role={onClick ? 'button' : undefined}
       aria-label={alt}
     >
-      <span className="img-slot__mark" aria-hidden="true">
-        ✳
-      </span>
-      <span className="img-slot__caption">{alt}</span>
+      {src ? (
+        <img className="img-slot__image" src={src} alt={alt} />
+      ) : (
+        <>
+          <span className="img-slot__mark" aria-hidden="true">✳</span>
+          <span className="img-slot__caption">{alt}</span>
+        </>
+      )}
     </div>
   );
 }

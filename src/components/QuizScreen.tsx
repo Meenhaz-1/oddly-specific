@@ -35,7 +35,7 @@ export default function QuizScreen({ state, question: q, actions }: QuizScreenPr
             onClick={actions.openViewer}
             style={{ filter: revealed ? 'saturate(.85) contrast(.94) opacity(.72)' : 'none' }}
           >
-            <ImagePlaceholder alt={q.imgAlt ?? 'Question image'} />
+            <ImagePlaceholder alt={q.imgAlt ?? 'Question image'} src={q.imgSrc} />
           </div>
           {notRevealed && q.note && (
             <div className="quiz__image-note">
