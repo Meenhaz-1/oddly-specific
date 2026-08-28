@@ -21,50 +21,12 @@
   max-width: 30em;
 }
 
-/* ---- Rotating question ticker (quiet proof, subordinate to the CTA) ---- */
-
-.landing__ticker {
-  font-family: var(--font-serif);
-  font-style: italic;
-  font-size: clamp(14px, 3.6vw, 16px);
-  line-height: 1.4;
-  color: var(--ink-soft);
-  margin: 20px 0 0;
-  min-height: 2.8em;
-  text-wrap: pretty;
-  animation: teaser-fade-in 0.4s ease both;
-}
-
-@keyframes teaser-fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .landing__ticker {
-    animation: none;
-  }
-}
-
-.landing__surprise {
-  margin-top: 18px;
-}
-
-.landing__surprise-button {
-  width: 100%;
-}
-
-.landing__surprise-button:disabled {
-  cursor: wait;
-  opacity: 0.72;
-}
-
 .landing__play-count {
   display: flex;
   align-items: baseline;
   justify-content: center;
   gap: 5px;
-  margin: 10px 0 0;
+  margin: 14px 0 0;
   color: var(--muted);
   font-size: 12.5px;
   line-height: 1.3;
@@ -76,13 +38,6 @@
   font-variant-numeric: tabular-nums;
   font-weight: 700;
   text-align: right;
-}
-
-.landing__surprise-error {
-  margin: 10px 2px 0;
-  color: #8f3328;
-  font-size: 14px;
-  line-height: 1.4;
 }
 
 /* ---- Moving subject reel ---- */
@@ -194,8 +149,44 @@
 /* ---- Other topic ---- */
 
 .other-topic {
-  display: flex;
   margin-top: 26px;
+}
+
+/* ---- Archive alternative ---- */
+
+.landing__surprise {
+  margin-top: 12px;
+}
+
+.landing__surprise-button {
+  min-height: 54px;
+  font-size: 15px;
+  letter-spacing: 0.01em;
+  text-transform: none;
+}
+
+.landing__surprise-button:disabled {
+  cursor: wait;
+}
+
+.landing__surprise-error {
+  margin: 9px 2px 0;
+  color: #8f3328;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.other-topic__label {
+  display: block;
+  margin: 0 0 9px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+}
+
+.other-topic__control {
+  display: flex;
   border: 1px solid var(--line-strong);
   background: var(--paper-raised);
 }
@@ -208,6 +199,12 @@
   padding: 16px;
   font-size: 16px;
   color: var(--ink);
+}
+
+.other-topic__input:disabled,
+.other-topic__submit:disabled {
+  cursor: wait;
+  opacity: 0.58;
 }
 
 .other-topic__submit {
@@ -226,10 +223,14 @@
   background: #1e4335;
 }
 
-.landing__footnote {
-  font-size: 13.5px;
-  line-height: 1.5;
-  color: var(--muted);
-  margin: 18px 0 0;
-  letter-spacing: 0.01em;
+@media (max-width: 420px) {
+  .other-topic__control {
+    display: grid;
+  }
+
+  .other-topic__submit {
+    min-height: 54px;
+    border-top: 1px solid var(--line-strong);
+    border-left: 0;
+  }
 }

@@ -13,6 +13,13 @@ import {
   getGeneratorInstructions,
   getPromptCacheKey,
 } from './server/prompts.js';
+import { validateTopic } from './server/topic.js';
+import {
+  applyEvaluationRewrite,
+  deduplicateQuestionsByShortAnswer,
+  validateGeneratedQuiz,
+  validatePlayerFacingQuestion,
+} from './server/question-validation.js';
 import {
   fetchRandomArchiveQuiz,
   isSupabaseConfigured,
@@ -193,7 +200,8 @@ interface EvaluationResult {
   evaluations: CandidateEvaluation[];
 }
 
-function passesShippingBar(evaluation: CandidateEvaluation): boolean {
+function passesShippingBar(evaluation: CandidateEvaluation, question: OpenEndedQuestion): boolean {
+  const finalQuestion = applyEvaluationRewrite(question, evaluation.rewrite);
   return (
     evaluation.decision !== 'REJECT' &&
     evaluation.overall >= 4 &&
@@ -202,7 +210,8 @@ function passesShippingBar(evaluation: CandidateEvaluation): boolean {
     evaluation.scores.clueDiscipline >= 4 &&
     evaluation.scores.answerPrecision >= 4 &&
     evaluation.factualConfidence !== 'Low' &&
-    (!evaluation.rewrite.applied || evaluation.rewrite.score >= 4)
+    (!evaluation.rewrite.applied || evaluation.rewrite.score >= 4) &&
+    validatePlayerFacingQuestion(finalQuestion).length === 0
   );
 }
 
@@ -410,12 +419,21 @@ async function evaluateQuestionsInBackground(
       `(${responseStats(evaluationResponse, initialInputTokens)}).`,
     );
     for (const evaluation of evaluationResult.evaluations) {
-      const ships = passesShippingBar(evaluation);
+      const question = questions.find((candidate) => candidate.id === evaluation.candidateId);
+      const ships = question ? passesShippingBar(evaluation, question) : false;
+      const copyIssues = question
+        ? validatePlayerFacingQuestion(applyEvaluationRewrite(question, evaluation.rewrite))
+        : [];
       const rewrite = evaluation.rewrite.applied ? ` | rewrite=${evaluation.rewrite.score.toFixed(1)}` : '';
       console.log(
         `[${runId}] ${evaluation.candidateId} | ${evaluation.decision} | overall=${evaluation.overall.toFixed(1)} | ` +
         `confidence=${evaluation.factualConfidence} | ships=${ships ? 'YES' : 'NO'}${rewrite}`,
       );
+      if (copyIssues.length > 0) {
+        console.warn(`[${runId}] ${evaluation.candidateId} failed deterministic player-copy validation.`, {
+          issues: copyIssues.map(({ code, field }) => ({ code, field })),
+        });
+      }
     }
     return {
       evaluations: evaluationResult.evaluations,
@@ -464,7 +482,10 @@ async function runBackgroundWorkflow(
     externalRunId,
     evaluationOutcome.evaluations.map((evaluation) => ({
       ...evaluation,
-      ships: passesShippingBar(evaluation),
+      ships: (() => {
+        const question = quiz.questions.find((candidate) => candidate.id === evaluation.candidateId);
+        return question ? passesShippingBar(evaluation, question) : false;
+      })(),
     })),
     evaluationOutcome.audit,
   );
@@ -513,7 +534,18 @@ app.post('/api/random-quiz', async (request, response) => {
     if (!quiz) {
       return response.status(404).json({ error: 'The archive does not have any vetted questions yet.' });
     }
-    return response.json(quiz);
+    const questions = deduplicateQuestionsByShortAnswer(
+      quiz.questions.filter((question) => validatePlayerFacingQuestion(question).length === 0),
+    );
+    if (questions.length === 0) {
+      return response.status(404).json({ error: 'The archive does not have any vetted questions yet.' });
+    }
+    return response.json({
+      ...quiz,
+      title: `${questions.length} Questions from the Archive`,
+      teaser: `${questions.length} good ${questions.length === 1 ? 'question' : 'questions'}, mixed across subjects and pulled from the archive.`,
+      questions: questions.map((question, index) => ({ ...question, position: index + 1 })),
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[ARCHIVE] Random quiz failed | ${message}`);
@@ -544,20 +576,22 @@ app.put('/api/questions/:questionId/feedback', async (request, response) => {
 });
 
 app.post('/api/generate', async (request, response) => {
-  const topic = String(request.body?.topic || '').trim();
+  const topicValidation = validateTopic(request.body?.topic);
   const requestedCount = Number(request.body?.count || 10);
   const questionCount = Number.isInteger(requestedCount) && requestedCount >= 1 && requestedCount <= 10 ? requestedCount : 10;
-  if (!topic || topic.length > 100) return response.status(400).json({ error: 'Enter a topic between 1 and 100 characters.' });
+  if (!topicValidation.valid) return response.status(400).json({ error: topicValidation.error });
+  const { topic } = topicValidation;
   if (!process.env.OPENAI_API_KEY) return response.status(503).json({ error: 'OpenAI is not configured. Add OPENAI_API_KEY to .env and restart the server.' });
 
   const runId = `GEN-${Date.now().toString(36).toUpperCase()}`;
   const startedAt = Date.now();
   try {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    console.log(
-      `[${runId}] Generating ${questionCount} questions about "${topic}" with ${generatorModel} ` +
-      '(web search enabled, max calls=2)...',
-    );
+    console.log(`[${runId}] Quiz generation started.`, {
+      questionCount,
+      model: generatorModel,
+      webSearchMaxCalls: 2,
+    });
     const generationRequest = withToolCallLimit({
       model: generatorModel,
       instructions: getGeneratorInstructions(),
@@ -580,10 +614,21 @@ app.post('/api/generate', async (request, response) => {
       runId: databaseRunId,
       questions: generatedQuiz.questions.map((question) => ({ ...question, questionId: randomUUID() })),
     };
+    const playerCopyIssues = validateGeneratedQuiz(quiz);
+    if (playerCopyIssues.length > 0) {
+      console.warn(`[${runId}] Generated quiz failed deterministic player-copy validation.`, {
+        issues: playerCopyIssues.map(({ code, field }) => ({ code, field })),
+      });
+      return response.status(502).json({ error: 'The generated quiz did not pass our quality checks. Please try again.' });
+    }
     const generationAudit = responseAudit(result, Date.now() - startedAt, generatorPromptCacheKey, initialInputTokens);
     console.log(`[${runId}] OpenAI completed in ${Math.round((Date.now() - startedAt) / 1000)}s (${responseStats(result, initialInputTokens)}).`);
     for (const candidate of quiz.questions) {
-      console.log(`[${runId}] ${candidate.id} ${candidate.label} | answer="${candidate.answer.short}" | sources=${candidate.sources.length}`);
+      console.log(`[${runId}] Candidate generated.`, {
+        candidateId: candidate.id,
+        label: candidate.label,
+        sourceCount: candidate.sources.length,
+      });
     }
     console.log(`[${runId}] Sending questions to the webpage now; evaluation will continue in the background.`);
     response.json(quiz);
@@ -600,10 +645,11 @@ app.post('/api/pipeline-test', async (request, response) => {
   if (process.env.NODE_ENV === 'production' || process.env.VERCEL) {
     return response.status(404).json({ error: 'Not found.' });
   }
-  const topic = String(request.body?.topic || '').trim();
+  const topicValidation = validateTopic(request.body?.topic);
   const requestedCount = Number(request.body?.candidateCount || 8);
   const candidateCount = Number.isInteger(requestedCount) && requestedCount >= 4 && requestedCount <= 10 ? requestedCount : 8;
-  if (!topic || topic.length > 100) return response.status(400).json({ error: 'Enter a topic between 1 and 100 characters.' });
+  if (!topicValidation.valid) return response.status(400).json({ error: topicValidation.error });
+  const { topic } = topicValidation;
   if (!process.env.OPENAI_API_KEY) return response.status(503).json({ error: 'OpenAI is not configured.' });
 
   const streaming = request.query.stream === '1';
@@ -639,7 +685,7 @@ app.post('/api/pipeline-test', async (request, response) => {
 
   try {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    logStage(`Request received | topic="${topic}" | candidates=${candidateCount}`);
+    logStage(`Request received | topicCharacters=${Array.from(topic).length} | candidates=${candidateCount}`);
     logStage(`Models | generator=${generatorModel} | evaluator=${evaluatorModel} | reasoning=medium | web-search=enabled`);
     const concurrency = Math.min(3, candidateCount);
     const slots = Array.from({ length: candidateCount }, (_, index) => index);
@@ -714,7 +760,7 @@ app.post('/api/pipeline-test', async (request, response) => {
       const rawEvaluation = parsedEvaluation.evaluations[0];
       if (!rawEvaluation) throw new Error(`Evaluator returned no decision for ${candidateId}.`);
       const evaluation: CandidateEvaluation = { ...rawEvaluation, candidateId };
-      const ships = passesShippingBar(evaluation);
+      const ships = passesShippingBar(evaluation, candidate);
       const rewrite = evaluation.rewrite.applied ? ` | rewrite=${evaluation.rewrite.score.toFixed(1)}` : '';
       logStage(`EVAL DONE  ${candidateId} | ${Math.round((Date.now() - evaluationStartedAt) / 1000)}s | ${responseStats(evaluationResponse)}`);
       logStage(
@@ -734,7 +780,10 @@ app.post('/api/pipeline-test', async (request, response) => {
     };
     logStage(`All ${candidateCount} candidate pipelines completed in ${Math.round((Date.now() - startedAt) / 1000)}s.`);
 
-    const ranked = evaluationResult.evaluations.filter(passesShippingBar).sort((a, b) => {
+    const ranked = evaluationResult.evaluations.filter((evaluation) => {
+      const candidate = candidates.questions.find((question) => question.id === evaluation.candidateId);
+      return candidate ? passesShippingBar(evaluation, candidate) : false;
+    }).sort((a, b) => {
       const scoreA = a.rewrite.applied ? a.rewrite.score : a.overall;
       const scoreB = b.rewrite.applied ? b.rewrite.score : b.overall;
       return scoreB - scoreA;
@@ -744,15 +793,7 @@ app.post('/api/pipeline-test', async (request, response) => {
       ? candidates.questions.find((candidate) => candidate.id === winningEvaluation.candidateId)
       : undefined;
     const finalist = original && winningEvaluation?.rewrite.applied
-      ? {
-          ...original,
-          context: winningEvaluation.rewrite.context,
-          prompt: winningEvaluation.rewrite.prompt,
-          answer: {
-            short: winningEvaluation.rewrite.answerShort,
-            explanation: winningEvaluation.rewrite.answerExplanation,
-          },
-        }
+      ? applyEvaluationRewrite(original, winningEvaluation.rewrite)
       : original ?? null;
 
     const accepted = evaluationResult.evaluations.filter((evaluation) => evaluation.decision === 'ACCEPT').length;
