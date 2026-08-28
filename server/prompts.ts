@@ -2,7 +2,9 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 
 function loadPrompt(filename: string): string {
-  return readFileSync(new URL(`../prompts/${filename}`, import.meta.url), 'utf8').trim();
+  return readFileSync(new URL(`../prompts/${filename}`, import.meta.url), 'utf8')
+    .replace(/\r\n?/g, '\n')
+    .trim();
 }
 
 const generatorTemplate = loadPrompt('generator.md');

@@ -1,14 +1,20 @@
 import { createHash } from 'node:crypto';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { GeneratedQuiz, OpenEndedQuestion } from '../src/types';
+import type { GeneratedQuiz, OpenEndedQuestion, RandomQuizResponse } from '../src/types';
 import { getCanonicalPromptDefinitions } from './prompts';
 
 export interface ResponseAudit {
   responseId: string | null;
   inputTokens: number | null;
+  initialInputTokens: number | null;
+  toolLoopInputTokens: number | null;
   cachedInputTokens: number | null;
+  uncachedInputTokens: number | null;
+  cacheWriteInputTokens: number | null;
   cacheHitRate: number | null;
   outputTokens: number | null;
+  reasoningOutputTokens: number | null;
+  visibleOutputTokens: number | null;
   totalTokens: number | null;
   webSearchCalls: number;
   durationMs: number;
@@ -179,9 +185,15 @@ export async function persistGeneratedQuiz(input: GeneratedQuizPersistenceInput)
       const cacheMetrics = await getAdminClient()
         .from('quiz_runs')
         .update({
+          generation_initial_input_tokens: input.generation.initialInputTokens,
+          generation_tool_loop_input_tokens: input.generation.toolLoopInputTokens,
           generation_cached_input_tokens: input.generation.cachedInputTokens,
+          generation_uncached_input_tokens: input.generation.uncachedInputTokens,
+          generation_cache_write_input_tokens: input.generation.cacheWriteInputTokens,
           generation_cache_hit_rate: input.generation.cacheHitRate,
           generation_prompt_cache_key: input.generation.promptCacheKey,
+          generation_reasoning_output_tokens: input.generation.reasoningOutputTokens,
+          generation_visible_output_tokens: input.generation.visibleOutputTokens,
         })
         .eq('id', input.runId);
       if (cacheMetrics.error) throw cacheMetrics.error;
@@ -214,9 +226,15 @@ export async function persistEvaluations(
       const cacheMetrics = await getAdminClient()
         .from('quiz_runs')
         .update({
+          evaluation_initial_input_tokens: audit.initialInputTokens,
+          evaluation_tool_loop_input_tokens: audit.toolLoopInputTokens,
           evaluation_cached_input_tokens: audit.cachedInputTokens,
+          evaluation_uncached_input_tokens: audit.uncachedInputTokens,
+          evaluation_cache_write_input_tokens: audit.cacheWriteInputTokens,
           evaluation_cache_hit_rate: audit.cacheHitRate,
           evaluation_prompt_cache_key: audit.promptCacheKey,
+          evaluation_reasoning_output_tokens: audit.reasoningOutputTokens,
+          evaluation_visible_output_tokens: audit.visibleOutputTokens,
         })
         .eq('id', runId);
       if (cacheMetrics.error) throw cacheMetrics.error;
@@ -250,6 +268,55 @@ export async function saveQuestionFeedback(questionId: string, sessionId: string
       );
     if (result.error) throw result.error;
   });
+}
+
+interface RandomArchiveRow {
+  question_id: string;
+  label: string;
+  context: string;
+  prompt: string;
+  answer_short: string;
+  answer_explanation: string;
+  topic: string;
+  sources: Array<{ id: string; title: string; publisher: string; url: string }>;
+  reset_exclusions: boolean;
+}
+
+export async function fetchRandomArchiveQuiz(
+  count: number,
+  excludeQuestionIds: string[],
+): Promise<RandomQuizResponse | null> {
+  if (!isSupabaseConfigured()) throw new Error('Supabase is not configured.');
+  const result = await getAdminClient().rpc('get_random_archive_questions', {
+    p_limit: count,
+    p_exclude_ids: excludeQuestionIds,
+  });
+  if (result.error) throw result.error;
+  const rows = (result.data || []) as RandomArchiveRow[];
+  if (rows.length === 0) return null;
+
+  const questions: OpenEndedQuestion[] = rows.map((row, index) => ({
+    questionId: row.question_id,
+    topic: row.topic,
+    id: row.question_id,
+    position: index + 1,
+    label: row.label,
+    format: 'open_ended',
+    context: row.context,
+    prompt: row.prompt,
+    answer: {
+      short: row.answer_short,
+      explanation: row.answer_explanation,
+    },
+    sources: row.sources,
+  }));
+
+  return {
+    title: `${questions.length} Questions from the Archive`,
+    teaser: `${questions.length} good ${questions.length === 1 ? 'question' : 'questions'}, mixed across subjects and pulled from the archive.`,
+    questions,
+    resetExclusions: rows[0]?.reset_exclusions === true,
+  };
 }
 
 export function questionsHaveDatabaseIds(questions: OpenEndedQuestion[]): boolean {

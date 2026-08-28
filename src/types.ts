@@ -44,6 +44,13 @@ export interface GeneratedQuiz {
   questions: OpenEndedQuestion[];
 }
 
+export interface RandomQuizResponse {
+  title: string;
+  teaser: string;
+  questions: OpenEndedQuestion[];
+  resetExclusions: boolean;
+}
+
 export interface OpenEndedSource {
   id: string;
   title: string;
@@ -53,6 +60,7 @@ export interface OpenEndedSource {
 
 export interface OpenEndedQuestion {
   questionId?: string;
+  topic?: string;
   id: string;
   position: number;
   label: string;
@@ -67,6 +75,7 @@ export interface OpenEndedQuestion {
 }
 
 export type QuizScreen = 'landing' | 'making' | 'intro' | 'quiz' | 'done';
+export type QuizMode = 'generated' | 'random';
 export type RevealStage = 0 | 1 | 2;
 export type Vote = 'up' | 'down' | null;
 export type ViewerTarget = 'sample' | 'question' | null;
@@ -74,6 +83,7 @@ export type SeenState = 'revealed' | 'skipped';
 
 export interface QuizState {
   screen: QuizScreen;
+  quizMode: QuizMode;
   menu: boolean;
   topic: string;
   other: string;
@@ -90,11 +100,12 @@ export interface QuizState {
   viewer: ViewerTarget;
   slide: -1 | 0 | 1;
   seen: Record<number, SeenState>;
-  prep: number;
   shareStatus: string;
   questions: QuizQuestion[] | null;
   teaser: string;
   generationError: string;
+  randomLoading: boolean;
+  randomError: string;
 }
 
 export interface QuizActions {
@@ -106,6 +117,7 @@ export interface QuizActions {
   again: () => void;
   newTopic: () => void;
   retryGeneration: () => void;
+  randomQuiz: () => void;
   startPlay: () => void;
   relatedTopic: () => void;
   share: () => Promise<void>;

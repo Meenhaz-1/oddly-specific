@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
 import OpenAI from 'openai';
+import type { InputTokenCountParams } from 'openai/resources/responses/input-tokens';
 import type { ResponseCreateParamsNonStreaming } from 'openai/resources/responses/responses';
 import { createServer as createViteServer } from 'vite';
 import type { GeneratedQuiz, OpenEndedQuestion } from './src/types';
@@ -13,6 +14,7 @@ import {
   getPromptCacheKey,
 } from './server/prompts';
 import {
+  fetchRandomArchiveQuiz,
   isSupabaseConfigured,
   markEvaluationFailed,
   persistEvaluations,
@@ -41,8 +43,9 @@ const evaluatorPromptCacheKey = getPromptCacheKey('evaluator');
 
 interface ResponseUsage {
   input_tokens?: number;
-  input_tokens_details?: { cached_tokens?: number } | null;
+  input_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number } | null;
   output_tokens?: number;
+  output_tokens_details?: { reasoning_tokens?: number } | null;
   total_tokens?: number;
 }
 
@@ -70,15 +73,24 @@ function responseStats(result: {
   id?: string;
   usage?: ResponseUsage | null;
   output?: Array<{ type?: string }>;
-}): string {
+}, initialInputTokens: number | null = null): string {
   const usage = result.usage;
   const webSearches = result.output?.filter((item) => item.type === 'web_search_call').length ?? 0;
   const cachedTokens = usage?.input_tokens_details?.cached_tokens;
+  const cacheWriteTokens = usage?.input_tokens_details?.cache_write_tokens;
+  const reasoningTokens = usage?.output_tokens_details?.reasoning_tokens;
+  const toolLoopTokens = usage?.input_tokens !== undefined && initialInputTokens !== null
+    ? Math.max(0, usage.input_tokens - initialInputTokens)
+    : null;
   const hitRate = cacheHitRate(usage);
   return [
     result.id ? `response=${result.id}` : null,
     usage ? `tokens=${usage.input_tokens ?? '?'} in/${usage.output_tokens ?? '?'} out/${usage.total_tokens ?? '?'} total` : null,
     cachedTokens === undefined ? null : `cache=${cachedTokens} tokens/${hitRate === null ? '?' : `${(hitRate * 100).toFixed(1)}%`}`,
+    cacheWriteTokens === undefined ? null : `cache-write=${cacheWriteTokens}`,
+    initialInputTokens === null ? null : `initial-input=${initialInputTokens}`,
+    toolLoopTokens === null ? null : `tool-loop-input=${toolLoopTokens}`,
+    reasoningTokens === undefined ? null : `reasoning-output=${reasoningTokens}`,
     `web-search calls=${webSearches}`,
   ].filter(Boolean).join(', ');
 }
@@ -87,18 +99,58 @@ function responseAudit(result: {
   id?: string;
   usage?: ResponseUsage | null;
   output?: Array<{ type?: string }>;
-}, durationMs: number, promptCacheKey: string): ResponseAudit {
+}, durationMs: number, promptCacheKey: string, initialInputTokens: number | null): ResponseAudit {
+  const inputTokens = result.usage?.input_tokens ?? null;
+  const cachedInputTokens = result.usage?.input_tokens_details?.cached_tokens ?? null;
+  const outputTokens = result.usage?.output_tokens ?? null;
+  const reasoningOutputTokens = result.usage?.output_tokens_details?.reasoning_tokens ?? null;
   return {
     responseId: result.id ?? null,
-    inputTokens: result.usage?.input_tokens ?? null,
-    cachedInputTokens: result.usage?.input_tokens_details?.cached_tokens ?? null,
+    inputTokens,
+    initialInputTokens,
+    toolLoopInputTokens: inputTokens !== null && initialInputTokens !== null
+      ? Math.max(0, inputTokens - initialInputTokens)
+      : null,
+    cachedInputTokens,
+    uncachedInputTokens: inputTokens !== null ? Math.max(0, inputTokens - (cachedInputTokens ?? 0)) : null,
+    cacheWriteInputTokens: result.usage?.input_tokens_details?.cache_write_tokens ?? null,
     cacheHitRate: cacheHitRate(result.usage),
-    outputTokens: result.usage?.output_tokens ?? null,
+    outputTokens,
+    reasoningOutputTokens,
+    visibleOutputTokens: outputTokens !== null ? Math.max(0, outputTokens - (reasoningOutputTokens ?? 0)) : null,
     totalTokens: result.usage?.total_tokens ?? null,
     webSearchCalls: result.output?.filter((item) => item.type === 'web_search_call').length ?? 0,
     durationMs,
     promptCacheKey,
   };
+}
+
+function inputTokenCountParams(params: ResponseCreateParamsNonStreaming): InputTokenCountParams {
+  return {
+    model: params.model,
+    instructions: params.instructions,
+    input: params.input,
+    parallel_tool_calls: params.parallel_tool_calls,
+    reasoning: params.reasoning,
+    text: params.text,
+    tool_choice: params.tool_choice,
+    tools: params.tools,
+    truncation: params.truncation ?? undefined,
+  };
+}
+
+async function countInitialInputTokens(
+  openai: OpenAI,
+  params: ResponseCreateParamsNonStreaming,
+  runId: string,
+): Promise<number | null> {
+  try {
+    const result = await openai.responses.inputTokens.count(inputTokenCountParams(params));
+    return result.input_tokens;
+  } catch (error) {
+    console.warn(`[${runId}] Initial input token count unavailable | ${apiErrorDetails(error).message}`);
+    return null;
+  }
 }
 
 interface CandidateEvaluation {
@@ -317,7 +369,7 @@ async function evaluateQuestionsInBackground(
     `(web search required, max calls=${maxWebSearchCalls}).`,
   );
   try {
-    const evaluationResponse = await openai.responses.create(withToolCallLimit({
+    const evaluationRequest = withToolCallLimit({
       model: evaluatorModel,
       instructions: getEvaluatorInstructions(),
       input: buildEvaluatorInput(
@@ -338,11 +390,14 @@ async function evaluateQuestionsInBackground(
       },
       max_output_tokens: 18000,
       store: false,
-    }, maxWebSearchCalls));
+    }, maxWebSearchCalls);
+    const initialInputPromise = countInitialInputTokens(openai, evaluationRequest, runId);
+    const evaluationResponse = await openai.responses.create(evaluationRequest);
+    const initialInputTokens = await initialInputPromise;
     const evaluationResult = JSON.parse(evaluationResponse.output_text) as EvaluationResult;
     console.log(
       `[${runId}] Background evaluation completed in ${Math.round((Date.now() - startedAt) / 1000)}s ` +
-      `(${responseStats(evaluationResponse)}).`,
+      `(${responseStats(evaluationResponse, initialInputTokens)}).`,
     );
     for (const evaluation of evaluationResult.evaluations) {
       const ships = passesShippingBar(evaluation);
@@ -354,7 +409,7 @@ async function evaluateQuestionsInBackground(
     }
     return {
       evaluations: evaluationResult.evaluations,
-      audit: responseAudit(evaluationResponse, Date.now() - startedAt, evaluatorPromptCacheKey),
+      audit: responseAudit(evaluationResponse, Date.now() - startedAt, evaluatorPromptCacheKey, initialInputTokens),
     };
   } catch (error) {
     const details = apiErrorDetails(error);
@@ -430,6 +485,32 @@ app.get('/api/health', (_request, response) => {
   });
 });
 
+app.post('/api/random-quiz', async (request, response) => {
+  const requestedCount = request.body?.count;
+  const exclusions = request.body?.excludeQuestionIds;
+  if (!Number.isInteger(requestedCount) || requestedCount < 1 || requestedCount > 10) {
+    return response.status(400).json({ error: 'Count must be an integer between 1 and 10.' });
+  }
+  if (!Array.isArray(exclusions) || exclusions.length > 500 || !exclusions.every((id) => typeof id === 'string' && uuidPattern.test(id))) {
+    return response.status(400).json({ error: 'excludeQuestionIds must contain at most 500 valid UUIDs.' });
+  }
+  if (!isSupabaseConfigured()) {
+    return response.status(503).json({ error: 'The question archive is not configured.' });
+  }
+
+  try {
+    const quiz = await fetchRandomArchiveQuiz(requestedCount, [...new Set(exclusions)]);
+    if (!quiz) {
+      return response.status(404).json({ error: 'The archive does not have any vetted questions yet.' });
+    }
+    return response.json(quiz);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[ARCHIVE] Random quiz failed | ${message}`);
+    return response.status(502).json({ error: 'Could not pick questions from the archive. Please try again.' });
+  }
+});
+
 app.put('/api/questions/:questionId/feedback', async (request, response) => {
   const questionId = String(request.params.questionId || '').trim();
   const sessionId = String(request.body?.sessionId || '').trim();
@@ -463,8 +544,11 @@ app.post('/api/generate', async (request, response) => {
   const startedAt = Date.now();
   try {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    console.log(`[${runId}] Generating ${questionCount} questions about "${topic}" with ${generatorModel}...`);
-    const result = await openai.responses.create({
+    console.log(
+      `[${runId}] Generating ${questionCount} questions about "${topic}" with ${generatorModel} ` +
+      '(web search enabled, max calls=2)...',
+    );
+    const generationRequest = withToolCallLimit({
       model: generatorModel,
       instructions: getGeneratorInstructions(),
       input: buildGeneratorInput(topic, questionCount, 'Generate the requested candidates now.'),
@@ -474,7 +558,10 @@ app.post('/api/generate', async (request, response) => {
       text: { format: { type: 'json_schema', name: 'verified_quiz', strict: true, schema: createQuizSchema(questionCount) } },
       max_output_tokens: 14000,
       store: false,
-    });
+    }, 2);
+    const initialInputPromise = countInitialInputTokens(openai, generationRequest, runId);
+    const result = await openai.responses.create(generationRequest);
+    const initialInputTokens = await initialInputPromise;
 
     const generatedQuiz = JSON.parse(result.output_text) as GeneratedQuiz;
     const databaseRunId = randomUUID();
@@ -483,8 +570,8 @@ app.post('/api/generate', async (request, response) => {
       runId: databaseRunId,
       questions: generatedQuiz.questions.map((question) => ({ ...question, questionId: randomUUID() })),
     };
-    const generationAudit = responseAudit(result, Date.now() - startedAt, generatorPromptCacheKey);
-    console.log(`[${runId}] OpenAI completed in ${Math.round((Date.now() - startedAt) / 1000)}s (${responseStats(result)}).`);
+    const generationAudit = responseAudit(result, Date.now() - startedAt, generatorPromptCacheKey, initialInputTokens);
+    console.log(`[${runId}] OpenAI completed in ${Math.round((Date.now() - startedAt) / 1000)}s (${responseStats(result, initialInputTokens)}).`);
     for (const candidate of quiz.questions) {
       console.log(`[${runId}] ${candidate.id} ${candidate.label} | answer="${candidate.answer.short}" | sources=${candidate.sources.length}`);
     }
@@ -555,7 +642,7 @@ app.post('/api/pipeline-test', async (request, response) => {
       const generationStartedAt = Date.now();
       logStage(`GEN START ${candidateId} | direction=${assignment.direction}`);
 
-      const generationResponse = await openai.responses.create({
+      const generationResponse = await openai.responses.create(withToolCallLimit({
         model: generatorModel,
         instructions: getGeneratorInstructions(),
         input: buildGeneratorInput(
@@ -567,10 +654,10 @@ app.post('/api/pipeline-test', async (request, response) => {
         ...promptCacheConfig(generatorModel, generatorPromptCacheKey),
         tools: [{ type: 'web_search' }],
         reasoning: { effort: 'medium' },
-        text: { format: { type: 'json_schema', name: `candidate_${candidateId}`, strict: true, schema: createQuizSchema(1) } },
+        text: { format: { type: 'json_schema', name: 'candidate_generation', strict: true, schema: createQuizSchema(1) } },
         max_output_tokens: 6000,
         store: false,
-      });
+      }, 1));
       const generated = JSON.parse(generationResponse.output_text) as GeneratedQuiz;
       const rawCandidate = generated.questions[0];
       if (!rawCandidate) throw new Error(`Generator returned no question for ${candidateId}.`);
@@ -604,7 +691,7 @@ app.post('/api/pipeline-test', async (request, response) => {
         text: {
           format: {
             type: 'json_schema',
-            name: `evaluation_${candidateId}`,
+            name: 'candidate_evaluation',
             strict: true,
             schema: createEvaluationSchema(1),
           },

@@ -33,13 +33,13 @@ export default function App() {
         {state.screen === 'landing' && <Landing state={state} actions={actions} />}
         {state.screen === 'quiz' && <QuizScreen state={state} question={question} actions={actions} />}
         {state.screen === 'making' && (
-          <Making topic={state.topic} prep={state.prep} error={state.generationError} actions={actions} />
+          <Making topic={state.topic} error={state.generationError} actions={actions} />
         )}
         {state.screen === 'intro' && (
-          <QuizIntro topic={state.topic} teaser={state.teaser} questionTotal={bank.length} actions={actions} />
+          <QuizIntro topic={state.topic} teaser={state.teaser} questionTotal={bank.length} quizMode={state.quizMode} actions={actions} />
         )}
         {state.screen === 'done' && (
-          <Done topic={state.topic} bank={bank} seen={state.seen} shareStatus={state.shareStatus} actions={actions} />
+          <Done topic={state.topic} bank={bank} seen={state.seen} shareStatus={state.shareStatus} quizMode={state.quizMode} actions={actions} />
         )}
       </div>
 
