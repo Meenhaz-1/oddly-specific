@@ -9,6 +9,7 @@ import QuizIntro from './components/QuizIntro';
 import Done from './components/Done';
 import Viewer from './components/Viewer';
 import { Analytics } from '@vercel/analytics/react';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 
 export default function App() {
   const { state, question, bank, actions } = useQuizEngine();
@@ -47,6 +48,7 @@ export default function App() {
         <Viewer alt={question.imgAlt ?? 'Quiz image'} src={question.imgSrc} onClose={actions.closeViewer} />
       )}
       <Analytics />
+      <SpeedInsights />
     </div>
   );
 }
