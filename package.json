@@ -21,9 +21,11 @@
     "@supabase/supabase-js": "^2.112.4",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "motion": "^13.1.1",
     "openai": "^7.5.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "react-use-measure": "^2.1.7"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",

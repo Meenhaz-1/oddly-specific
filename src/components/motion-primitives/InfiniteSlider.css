@@ -1,0 +1,26 @@
+.infinite-slider {
+  width: 100%;
+  overflow: hidden;
+}
+
+.infinite-slider__track,
+.infinite-slider__set {
+  display: flex;
+  width: max-content;
+}
+
+.infinite-slider__track--vertical,
+.infinite-slider__set--vertical {
+  flex-direction: column;
+}
+
+.infinite-slider__set {
+  flex: none;
+  gap: inherit;
+}
+
+.infinite-slider--static {
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scroll-snap-type: x proximity;
+}

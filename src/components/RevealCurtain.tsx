@@ -4,9 +4,9 @@ import type { CSSProperties, ReactNode } from 'react';
 import type { RevealStage } from '../types';
 
 /**
- * The "paper roll" reveal used for both the landing sample and each
- * question's answer: content sits clipped shut, a curtain edge sweeps
- * left-to-right as it opens, mirroring the design's clip-path animation.
+ * The "paper roll" reveal used for each question's answer: content sits
+ * clipped shut, a curtain edge sweeps left-to-right as it opens, mirroring
+ * the design's clip-path animation.
  *
  * `stage`: 0 not mounted, 1 mounted/closed, 2 open.
  * `rolling`: true while the edge highlight should be visible.

@@ -8,7 +8,6 @@ import Making from './components/Making';
 import QuizIntro from './components/QuizIntro';
 import Done from './components/Done';
 import Viewer from './components/Viewer';
-import { SAMPLE_QUESTION } from './data/questions';
 
 export default function App() {
   const { state, question, bank, actions } = useQuizEngine();
@@ -44,11 +43,7 @@ export default function App() {
       </div>
 
       {state.viewer && (
-        <Viewer
-          alt={(state.viewer === 'sample' ? SAMPLE_QUESTION.imgAlt : question.imgAlt) ?? 'Quiz image'}
-          src={state.viewer === 'sample' ? SAMPLE_QUESTION.imgSrc : question.imgSrc}
-          onClose={actions.closeViewer}
-        />
+        <Viewer alt={question.imgAlt ?? 'Quiz image'} src={question.imgSrc} onClose={actions.closeViewer} />
       )}
     </div>
   );

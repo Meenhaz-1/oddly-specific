@@ -23,8 +23,6 @@ const initialState: QuizState = {
   menu: false,
   topic: 'Indian sport',
   other: '',
-  sample: 0, // 0 closed, 1 mounted/clipped, 2 open
-  sampleRoll: false,
   qi: 0,
   stage: 0, // 0 unrevealed, 1 mounted/clipped, 2 open
   roll: false,
@@ -33,7 +31,7 @@ const initialState: QuizState = {
   pick: null,
   vote: null,
   votes: {},
-  viewer: null, // 'sample' | 'question' | null
+  viewer: null, // 'question' | null
   slide: 0, // -1 leaving left, 0 settled, 1 entering from right
   seen: {},
   shareStatus: '',
@@ -225,16 +223,10 @@ export function useQuizEngine() {
   const bank = state.questions?.length ? state.questions : QUESTION_BANK;
   const question = bank[state.qi]!;
 
-  const openRoll = (kind: 'sample' | 'answer') => {
-    if (kind === 'sample') {
-      patch({ sample: 1, sampleRoll: true });
-      nextFrame(() => patch({ sample: 2 }));
-      after(REVEAL_MS + 120, () => patch({ sampleRoll: false }));
-    } else {
-      patch({ stage: 1, roll: true });
-      nextFrame(() => patch({ stage: 2 }));
-      after(REVEAL_MS + 120, () => patch({ roll: false }));
-    }
+  const openRoll = () => {
+    patch({ stage: 1, roll: true });
+    nextFrame(() => patch({ stage: 2 }));
+    after(REVEAL_MS + 120, () => patch({ roll: false }));
   };
 
   const begin = async (topic: string): Promise<void> => {
@@ -444,12 +436,7 @@ export function useQuizEngine() {
       }
     },
 
-    revealSample: () => {
-      if (!state.sample) openRoll('sample');
-    },
-    openSampleViewer: () => patch({ viewer: 'sample' }),
-
-    revealAnswer: () => openRoll('answer'),
+    revealAnswer: () => openRoll(),
     nextClue: () => patch((s) => ({ clueCount: s.clueCount + 1 })),
     pickChoice: (key) => patch({ pick: key }),
     toggleSources: () => patch((s) => ({ sourcesOpen: !s.sourcesOpen })),

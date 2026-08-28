@@ -1,9 +1,14 @@
 import './Landing.css';
-import RevealCurtain from './RevealCurtain';
-import ImagePlaceholder from './ImagePlaceholder';
-import { SAMPLE_QUESTION, TOPICS } from '../data/questions';
+import { useEffect, useState } from 'react';
+import { AnimatedNumber } from './motion-primitives/AnimatedNumber';
+import { InfiniteSlider } from './motion-primitives/InfiniteSlider';
+import { LANDING_TEASERS, TOPICS } from '../data/questions';
 import type { KeyboardEvent } from 'react';
 import type { QuizActions, QuizState } from '../types';
+
+const TEASER_ROTATE_MS = 8000;
+// Temporary local value until quiz-play analytics are read from the database.
+const QUIZZES_PLAYED = 271;
 
 interface LandingProps {
   state: QuizState;
@@ -11,7 +16,16 @@ interface LandingProps {
 }
 
 export default function Landing({ state, actions }: LandingProps) {
-  const { sample, sampleRoll, other } = state;
+  const { other } = state;
+  const [teaserIndex, setTeaserIndex] = useState(() => Math.floor(Math.random() * LANDING_TEASERS.length));
+
+  useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const id = window.setInterval(() => {
+      setTeaserIndex((i) => (i + 1) % LANDING_TEASERS.length);
+    }, TEASER_ROTATE_MS);
+    return () => window.clearInterval(id);
+  }, []);
 
   const onOtherKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') actions.startQuiz();
@@ -22,8 +36,10 @@ export default function Landing({ state, actions }: LandingProps) {
       <h1 className="landing__hero">A better question changes the room.</h1>
       <div className="rule" />
       <p className="landing__sub">
-        Pick a subject. We&rsquo;ll make ten worth asking &mdash; each one checked against a real source.
+        Pick a subject. We&rsquo;ll make ten worth asking, each one checked against a real source.
       </p>
+
+      <p key={teaserIndex} className="landing__ticker">{LANDING_TEASERS[teaserIndex]}</p>
 
       <div className="landing__surprise">
         <button
@@ -34,43 +50,17 @@ export default function Landing({ state, actions }: LandingProps) {
           <span>{state.randomLoading ? 'Picking from the archive…' : 'Surprise me with 10 questions'}</span>
           <span className="btn__arrow" aria-hidden="true">&rarr;</span>
         </button>
+        <p className="landing__play-count" aria-label={`${QUIZZES_PLAYED} quizzes played so far`}>
+          <AnimatedNumber
+            className="landing__play-count-number"
+            springOptions={{ bounce: 0, duration: 1800 }}
+            value={QUIZZES_PLAYED}
+          />
+          <span>quizzes played so far</span>
+        </p>
         {state.randomError && (
           <p className="landing__surprise-error" role="alert">{state.randomError}</p>
         )}
-      </div>
-
-      <div className="sample">
-        <div className="sample__clip sample__clip--a" aria-hidden="true" />
-        <div className="sample__clip sample__clip--b" aria-hidden="true" />
-
-        <div className="sample__card">
-          <div className="section-label">TRY ONE</div>
-          <p className="sample__question">{SAMPLE_QUESTION.setup}</p>
-
-          <div className="sample__image" onClick={actions.openSampleViewer}>
-            <ImagePlaceholder alt={SAMPLE_QUESTION.imgAlt ?? 'Sample question image'} src={SAMPLE_QUESTION.imgSrc} />
-            <div className="sample__tape" />
-          </div>
-
-          {sample === 0 && (
-            <div className="sample__prompt">
-              <span className="hand">your guess?</span>
-              <span className="hand">&rarr;</span>
-            </div>
-          )}
-
-          <RevealCurtain stage={sample} rolling={sampleRoll} edgeWidth={46} className="sample__reveal">
-            <div className="sample__answer-wrap">
-              <div className="hand-answer">{SAMPLE_QUESTION.answer}</div>
-              <p className="sample__explain">{SAMPLE_QUESTION.explain}</p>
-            </div>
-          </RevealCurtain>
-        </div>
-
-        <button className="btn btn--gold sample__cta" onClick={actions.revealSample} disabled={!!sample}>
-          <span>{sample ? 'Sample revealed' : 'Reveal sample'}</span>
-          <span className="btn__arrow">&rarr;</span>
-        </button>
       </div>
 
       <div className="section-heading">
@@ -78,15 +68,32 @@ export default function Landing({ state, actions }: LandingProps) {
         <span className="section-heading__rule" />
       </div>
 
-      <div className="topics">
-        {TOPICS.map((t) => (
-          <div key={t.name} className="topics__row" onClick={() => actions.pickTopic(t.name)}>
-            <span className="topics__tab" style={{ background: t.tab }} />
-            <span className="topics__name">{t.name}</span>
-            <span className="topics__count">{t.count}</span>
-            <span className="topics__arrow">&rarr;</span>
-          </div>
-        ))}
+      <div className="topics-reel">
+        <InfiniteSlider
+          className="topics-reel__slider"
+          gap={12}
+          speed={34}
+          speedOnHover={0}
+          reverse
+          ariaLabel="Quiz subjects"
+        >
+          {TOPICS.map((topic) => (
+            <button
+              key={topic.name}
+              type="button"
+              className="topic-ticket"
+              onClick={() => actions.pickTopic(topic.name)}
+              disabled={state.randomLoading}
+            >
+              <span className="topic-ticket__tab" style={{ background: topic.tab }} aria-hidden="true" />
+              <span className="topic-ticket__name">{topic.name}</span>
+              <span className="topic-ticket__meta">
+                <span>{topic.count === 'NEW' ? 'New set' : `${topic.count} questions`}</span>
+                <span className="topic-ticket__arrow" aria-hidden="true">&rarr;</span>
+              </span>
+            </button>
+          ))}
+        </InfiniteSlider>
       </div>
 
       <div className="other-topic">
@@ -102,7 +109,7 @@ export default function Landing({ state, actions }: LandingProps) {
         </button>
       </div>
 
-      <p className="landing__footnote">Two questions. No score, no timer &mdash; just the pleasure of working one out.</p>
+      <p className="landing__footnote">Two questions. No score, no timer. Just the pleasure of working one out.</p>
     </div>
   );
 }

@@ -80,9 +80,6 @@ export default function QuizScreen({ state, question: q, actions }: QuizScreenPr
 
       {q.kind === 'blank' && (
         <div className="quiz__blank">
-          <p className="quiz__blank-lead">
-            1 rupee = 16 annas, so <i>solah anna</i> came to mean
-          </p>
           <div className="quiz__blank-line">&mdash;&mdash;&mdash;&mdash;</div>
         </div>
       )}
