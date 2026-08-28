@@ -25,6 +25,20 @@ export default function Landing({ state, actions }: LandingProps) {
         Pick a subject. We&rsquo;ll make ten worth asking &mdash; each one checked against a real source.
       </p>
 
+      <div className="landing__surprise">
+        <button
+          className="btn btn--forest landing__surprise-button"
+          onClick={actions.randomQuiz}
+          disabled={state.randomLoading}
+        >
+          <span>{state.randomLoading ? 'Picking from the archive…' : 'Surprise me with 10 questions'}</span>
+          <span className="btn__arrow" aria-hidden="true">&rarr;</span>
+        </button>
+        {state.randomError && (
+          <p className="landing__surprise-error" role="alert">{state.randomError}</p>
+        )}
+      </div>
+
       <div className="sample">
         <div className="sample__clip sample__clip--a" aria-hidden="true" />
         <div className="sample__clip sample__clip--b" aria-hidden="true" />

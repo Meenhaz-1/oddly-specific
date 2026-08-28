@@ -1,18 +1,21 @@
 import './QuizIntro.css';
-import type { QuizActions } from '../types';
+import type { QuizActions, QuizMode } from '../types';
 
 interface QuizIntroProps {
   topic: string;
   teaser: string;
   questionTotal: number;
+  quizMode: QuizMode;
   actions: QuizActions;
 }
 
-export default function QuizIntro({ topic, teaser, questionTotal, actions }: QuizIntroProps) {
+export default function QuizIntro({ topic, teaser, questionTotal, quizMode, actions }: QuizIntroProps) {
   return (
     <main className="quiz-intro">
       <div className="section-label">YOUR SET IS READY</div>
-      <h1 className="quiz-intro__title">{questionTotal} Questions on {topic}</h1>
+      <h1 className="quiz-intro__title">
+        {quizMode === 'random' ? `${questionTotal} Questions from the Archive` : `${questionTotal} Questions on ${topic}`}
+      </h1>
       <div className="rule" />
       <p className="quiz-intro__teaser">
         {teaser || 'Origins, overlooked details, practical inventions, and a few things hiding in plain sight.'}

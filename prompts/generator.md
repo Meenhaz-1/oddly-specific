@@ -86,6 +86,13 @@ Treat these as high-risk and verify especially carefully:
 
 If the premise cannot be verified, reject the candidate and generate another.
 
+## Retrieval budget
+
+- Begin with one broad web search that can support all requested candidates.
+- Make a second search only when a material claim still needs verification.
+- Do not make more than two searches in total.
+- Prefer a small set of authoritative sources that can verify several claims over many narrow searches.
+
 ## Avoid these common failure modes
 
 Reject any candidate that is:

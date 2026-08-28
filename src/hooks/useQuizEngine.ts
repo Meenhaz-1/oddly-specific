@@ -1,15 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { QUESTION_BANK } from '../data/questions';
-import type { GeneratedQuiz, OpenEndedQuestion, QuizActions, QuizQuestion, QuizState, SeenState } from '../types';
+import type { GeneratedQuiz, OpenEndedQuestion, QuizActions, QuizQuestion, QuizState, RandomQuizResponse, SeenState } from '../types';
 
 // Reveal-curtain animation duration (ms). Matches the design's default.
 export const REVEAL_MS = 620;
 export const GENERATED_QUESTION_COUNT = 2;
+export const RANDOM_QUESTION_COUNT = 10;
+/** Pacing estimate for the assembling screen. Not a timeout: the request
+ * resolves when it resolves; this only shapes the progress curve. */
+export const EXPECTED_GENERATION_MS = 45_000;
 const STORAGE_KEY = 'oddly-specific-progress-v1';
 const FEEDBACK_SESSION_KEY = 'oddly-specific-feedback-session-v1';
+const RANDOM_SEEN_SESSION_KEY = 'oddly-specific-random-seen-v1';
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const initialState: QuizState = {
   screen: 'landing', // 'landing' | 'making' | 'intro' | 'quiz' | 'done'
+  quizMode: 'generated',
   menu: false,
   topic: 'Indian sport',
   other: '',
@@ -26,11 +33,12 @@ const initialState: QuizState = {
   viewer: null, // 'sample' | 'question' | null
   slide: 0, // -1 leaving left, 0 settled, 1 entering from right
   seen: {},
-  prep: 0,
   shareStatus: '',
   questions: null,
   teaser: '',
   generationError: '',
+  randomLoading: false,
+  randomError: '',
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -73,6 +81,47 @@ function isGeneratedQuiz(value: unknown): value is GeneratedQuiz {
     value.questions.length === GENERATED_QUESTION_COUNT &&
     value.questions.every(isOpenEndedQuestion)
   );
+}
+
+function isRandomQuizResponse(value: unknown): value is RandomQuizResponse {
+  return (
+    isRecord(value) &&
+    typeof value.title === 'string' &&
+    typeof value.teaser === 'string' &&
+    typeof value.resetExclusions === 'boolean' &&
+    Array.isArray(value.questions) &&
+    value.questions.length >= 1 &&
+    value.questions.length <= RANDOM_QUESTION_COUNT &&
+    value.questions.every((question) => isOpenEndedQuestion(question) && typeof question.topic === 'string')
+  );
+}
+
+function toQuizQuestions(questions: OpenEndedQuestion[]): QuizQuestion[] {
+  return questions.map((generated) => ({
+    questionId: generated.questionId,
+    label: generated.label,
+    kind: 'text',
+    setup: generated.context,
+    ask: generated.prompt,
+    answer: generated.answer.short,
+    explain: generated.answer.explanation,
+    sources: generated.sources.map((source) => ({
+      title: source.title,
+      meta: source.publisher,
+      url: source.url,
+    })),
+  }));
+}
+
+function getRandomSeenIds(): string[] {
+  try {
+    const parsed: unknown = JSON.parse(window.sessionStorage.getItem(RANDOM_SEEN_SESSION_KEY) || '[]');
+    return Array.isArray(parsed)
+      ? [...new Set(parsed.filter((value): value is string => typeof value === 'string' && uuidPattern.test(value)))].slice(-500)
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 function getFeedbackSessionId(): string {
@@ -141,7 +190,7 @@ export function useQuizEngine() {
     setState((s) => ({ ...s, ...(typeof fields === 'function' ? fields(s) : fields) }));
   }, []);
 
-  const bank = state.questions?.length === GENERATED_QUESTION_COUNT ? state.questions : QUESTION_BANK;
+  const bank = state.questions?.length ? state.questions : QUESTION_BANK;
   const question = bank[state.qi]!;
 
   const openRoll = (kind: 'sample' | 'answer') => {
@@ -159,9 +208,9 @@ export function useQuizEngine() {
   const begin = async (topic: string): Promise<void> => {
     patch({
       screen: 'making',
+      quizMode: 'generated',
       menu: false,
       topic,
-      prep: 0,
       qi: 0,
       stage: 0,
       roll: false,
@@ -174,9 +223,9 @@ export function useQuizEngine() {
       questions: null,
       teaser: '',
       generationError: '',
+      randomLoading: false,
+      randomError: '',
     });
-    [1, 2, 3].forEach((n, i) => after(480 + i * 520, () => patch({ prep: n })));
-
     try {
       const apiResponse = await fetch('/api/generate', {
         method: 'POST',
@@ -189,24 +238,58 @@ export function useQuizEngine() {
         throw new Error(apiError);
       }
       if (!isGeneratedQuiz(result)) throw new Error('The generated set was incomplete or malformed.');
-      const questions: QuizQuestion[] = result.questions.map((generated) => ({
-        questionId: generated.questionId,
-        label: generated.label,
-        kind: 'text',
-        setup: generated.context,
-        ask: generated.prompt,
-        answer: generated.answer.short,
-        explain: generated.answer.explanation,
-        sources: generated.sources.map((source) => ({
-          title: source.title,
-          meta: source.publisher,
-          url: source.url,
-        })),
-      }));
-      patch({ questions, teaser: result.teaser, prep: 3, screen: 'intro' });
+      const questions = toQuizQuestions(result.questions);
+      patch({ questions, teaser: result.teaser, screen: 'intro' });
       window.scrollTo(0, 0);
     } catch (error) {
       patch({ generationError: errorMessage(error) });
+    }
+  };
+
+  const beginRandom = async (): Promise<void> => {
+    const excludedIds = getRandomSeenIds();
+    patch({ screen: 'landing', menu: false, randomLoading: true, randomError: '', shareStatus: '' });
+    window.scrollTo(0, 0);
+    try {
+      const apiResponse = await fetch('/api/random-quiz', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ count: RANDOM_QUESTION_COUNT, excludeQuestionIds: excludedIds }),
+      });
+      const result: unknown = await apiResponse.json().catch(() => null);
+      if (!apiResponse.ok) {
+        const apiError = isRecord(result) && typeof result.error === 'string'
+          ? result.error
+          : 'Could not pick questions from the archive.';
+        throw new Error(apiError);
+      }
+      if (!isRandomQuizResponse(result)) throw new Error('The archive returned an incomplete or malformed quiz.');
+
+      const servedIds = result.questions.map((item) => item.questionId!);
+      const nextSeenIds = result.resetExclusions ? servedIds : [...new Set([...excludedIds, ...servedIds])];
+      window.sessionStorage.setItem(RANDOM_SEEN_SESSION_KEY, JSON.stringify(nextSeenIds.slice(-500)));
+      patch({
+        screen: 'intro',
+        quizMode: 'random',
+        topic: 'The Archive',
+        qi: 0,
+        stage: 0,
+        roll: false,
+        sourcesOpen: false,
+        clueCount: 1,
+        pick: null,
+        vote: null,
+        votes: {},
+        seen: {},
+        questions: toQuizQuestions(result.questions),
+        teaser: result.teaser,
+        generationError: '',
+        randomLoading: false,
+        randomError: '',
+      });
+      window.scrollTo(0, 0);
+    } catch (error) {
+      patch({ screen: 'landing', randomLoading: false, randomError: errorMessage(error) });
     }
   };
 
@@ -277,15 +360,18 @@ export function useQuizEngine() {
     goHome: () => patch({ screen: 'landing', menu: false, shareStatus: '' }),
     toggleMenu: () => patch((s) => ({ menu: !s.menu })),
     setOther: (value) => patch({ other: value }),
-    startQuiz: () => begin(state.other.trim() || state.topic),
+    startQuiz: () => begin(state.other.trim() || (state.quizMode === 'random' ? initialState.topic : state.topic)),
     pickTopic: (name) => begin(name),
-    again: () => begin(state.topic),
+    again: () => state.quizMode === 'random' ? void beginRandom() : void begin(state.topic),
     newTopic: () => {
       window.localStorage.removeItem(STORAGE_KEY);
-      patch({ ...initialState, topic: state.topic });
+      patch({ ...initialState, topic: state.quizMode === 'random' ? initialState.topic : state.topic });
       window.scrollTo(0, 0);
     },
     retryGeneration: () => begin(state.topic),
+    randomQuiz: () => {
+      if (!state.randomLoading) void beginRandom();
+    },
     startPlay: () => {
       patch({ screen: 'quiz', slide: 1 });
       window.scrollTo(0, 0);

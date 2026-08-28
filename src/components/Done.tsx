@@ -1,22 +1,28 @@
 import './Done.css';
-import type { QuizActions, QuizQuestion, SeenState } from '../types';
+import type { QuizActions, QuizMode, QuizQuestion, SeenState } from '../types';
 
 interface DoneProps {
   topic: string;
   bank: QuizQuestion[];
   seen: Record<number, SeenState>;
   shareStatus: string;
+  quizMode: QuizMode;
   actions: QuizActions;
 }
 
-export default function Done({ topic, bank, seen, shareStatus, actions }: DoneProps) {
+export default function Done({ topic, bank, seen, shareStatus, quizMode, actions }: DoneProps) {
+  const random = quizMode === 'random';
   return (
     <div className="done">
-      <div className="section-label">END OF SET &middot; {topic}</div>
-      <h2 className="done__title">You finished {bank.length} Questions on {topic}.</h2>
+      <div className="section-label">END OF SET{random ? ' · FROM THE ARCHIVE' : ` · ${topic}`}</div>
+      <h2 className="done__title">
+        {random ? `You finished ${bank.length} Questions from the Archive.` : `You finished ${bank.length} Questions on ${topic}.`}
+      </h2>
       <div className="rule" />
       <p className="done__sub">
-        The set stays exactly as you played it. Share it with someone who would enjoy working through the same questions.
+        {random
+          ? 'Ready for another mix? The archive will avoid repeats until you have worked through the available questions.'
+          : 'The set stays exactly as you played it. Share it with someone who would enjoy working through the same questions.'}
       </p>
 
       <div className="done__recap">
@@ -38,13 +44,22 @@ export default function Done({ topic, bank, seen, shareStatus, actions }: DonePr
       </div>
 
       <div className="done__actions">
-        <button className="btn btn--forest" onClick={actions.share}>
-          <span>{shareStatus || 'Share this quiz'}</span>
-          <span className="btn__arrow">&rarr;</span>
-        </button>
-        <button className="btn btn--gold" onClick={actions.again}>Generate {bank.length} more on {topic}</button>
-        <button className="btn btn--outline" onClick={actions.relatedTopic}>Try a related topic</button>
-        <button className="done__new-topic" onClick={actions.newTopic}>Start a new topic</button>
+        {random ? (
+          <>
+            <button className="btn btn--forest" onClick={actions.again}>Pick {bank.length} more</button>
+            <button className="btn btn--outline" onClick={actions.newTopic}>Choose a subject</button>
+          </>
+        ) : (
+          <>
+            <button className="btn btn--forest" onClick={actions.share}>
+              <span>{shareStatus || 'Share this quiz'}</span>
+              <span className="btn__arrow">&rarr;</span>
+            </button>
+            <button className="btn btn--gold" onClick={actions.again}>Generate {bank.length} more on {topic}</button>
+            <button className="btn btn--outline" onClick={actions.relatedTopic}>Try a related topic</button>
+            <button className="done__new-topic" onClick={actions.newTopic}>Start a new topic</button>
+          </>
+        )}
       </div>
     </div>
   );

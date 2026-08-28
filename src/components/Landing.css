@@ -21,6 +21,26 @@
   max-width: 30em;
 }
 
+.landing__surprise {
+  margin-top: 24px;
+}
+
+.landing__surprise-button {
+  width: 100%;
+}
+
+.landing__surprise-button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.landing__surprise-error {
+  margin: 10px 2px 0;
+  color: #8f3328;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
 /* ---- Try-one sample card ---- */
 
 .sample {
