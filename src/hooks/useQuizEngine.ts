@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { GENERATED_QUESTION_COUNT, RANDOM_QUESTION_COUNT } from '../constants';
 import { QUESTION_BANK } from '../data/questions';
 import type { GeneratedQuiz, OpenEndedQuestion, QuizActions, QuizQuestion, QuizState, RandomQuizResponse, SeenState } from '../types';
 
 // Reveal-curtain animation duration (ms). Matches the design's default.
 export const REVEAL_MS = 620;
-export const GENERATED_QUESTION_COUNT = 2;
-export const RANDOM_QUESTION_COUNT = 10;
 /** Pacing estimate for the assembling screen. Not a timeout: the request
  * resolves when it resolves; this only shapes the progress curve. */
 export const EXPECTED_GENERATION_MS = 45_000;

@@ -1,0 +1,3 @@
+export const MAX_TOPIC_CHARACTERS = 100;
+export const GENERATED_QUESTION_COUNT = 2;
+export const RANDOM_QUESTION_COUNT = 10;

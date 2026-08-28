@@ -21,10 +21,6 @@ export default function QuizIntro({ topic, teaser, questionTotal, quizMode, acti
       <p className="quiz-intro__teaser">
         {teaser || 'Origins, overlooked details, practical inventions, and a few things hiding in plain sight.'}
       </p>
-      <div className="quiz-intro__note">
-        <span className="quiz-intro__number">{questionTotal}</span>
-        <span>No score. No timer. Take your time with each one.</span>
-      </div>
       <button className="btn btn--forest quiz-intro__start" onClick={actions.startPlay}>
         <BorderTrail
           size={128}

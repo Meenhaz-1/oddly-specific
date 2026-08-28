@@ -135,7 +135,7 @@ export default function QuizScreen({ state, question: q, actions }: QuizScreenPr
         </div>
       </RevealCurtain>
 
-      <div className="quiz__cta is-floating">
+      <div className={`quiz__cta ${notRevealed ? 'is-floating' : 'is-after-answer'}`}>
         {notRevealed ? (
           <div>
             <button className="btn btn--forest" onClick={actions.revealAnswer}>

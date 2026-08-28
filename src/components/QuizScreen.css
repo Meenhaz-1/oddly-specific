@@ -311,6 +311,11 @@
   background: linear-gradient(180deg, rgba(247, 243, 233, 0) 0%, rgba(247, 243, 233, 0.92) 34%, #f7f3e9 62%);
 }
 
+.quiz__cta.is-after-answer {
+  position: static;
+  background: transparent;
+}
+
 .quiz__skip {
   text-align: center;
   margin-top: 18px;
