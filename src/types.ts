@@ -24,6 +24,7 @@ export interface QuizQuestion {
   ask?: string;
   note?: string;
   imgAlt?: string;
+  imgSrc?: string;
   answer: string;
   explain: string;
   clues?: QuizClue[];

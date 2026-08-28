@@ -36,7 +36,10 @@ const PHASES = [
 
 const WARMUPS = [
   { q: 'A pineapple takes about this long to grow one fruit.', a: 'Two years' },
-  { q: 'The number of bones in the human foot, out of 206 in the body.', a: '26 — a quarter of them' },
+  {
+    q: 'Together, both human feet contain this many bones, out of 206 in the adult body.',
+    a: '52 — slightly more than a quarter of the skeleton',
+  },
   { q: 'Venetian glassmakers were moved to the island of Murano in 1291 for this reason.', a: 'Fire risk' },
 ];
 
