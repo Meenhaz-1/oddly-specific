@@ -27,3 +27,9 @@ dist-ssr
 *.sw?
 shots/
 supabase/.temp/
+
+# Local AI-agent workspace configuration
+.agents/
+.claude/
+
+.vercel/

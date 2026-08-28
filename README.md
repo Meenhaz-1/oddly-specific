@@ -44,6 +44,33 @@ npm run build     # production build -> dist/
 NODE_ENV=production npm start
 ```
 
+## Deploy to Vercel
+
+The repository includes a Vite deployment configuration and a catch-all
+Vercel Function for the existing `/api/*` routes. Import the GitHub repository
+in Vercel, keep the detected framework as **Vite**, and add these server-side
+environment variables for Production (and Preview if you test there):
+
+```dotenv
+OPENAI_API_KEY=sk-your-key-here
+OPENAI_MODEL=gpt-5.4-mini
+OPENAI_GENERATOR_MODEL=gpt-5.5
+OPENAI_EVALUATOR_MODEL=gpt-5.4-mini
+SUPABASE_URL=https://your-project-ref.supabase.co
+SUPABASE_SECRET_KEY=sb_secret_your-key-here
+```
+
+Do not give any secret a `VITE_` prefix. Vite exposes variables with that
+prefix to browser code. The `/api/generate` function allows the landing-page
+topic field to generate a quiz in production; its background evaluation and
+database writes use Vercel's request-lifetime extension and a five-minute
+function duration.
+
+Until public generation has authentication or a durable rate limit, keep the
+deployment protected or share its URL only with trusted testers: every visitor
+who can reach the page can otherwise spend the configured OpenAI account's
+quota.
+
 ## Supabase and GitHub schema workflow
 
 The database schema is code-owned under [`supabase/migrations`](supabase/migrations).
