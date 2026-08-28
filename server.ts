@@ -25,6 +25,7 @@ import {
 } from './server/persistence.js';
 
 const app = express();
+app.disable('x-powered-by');
 const port = Number(process.env.PORT || 5173);
 
 type ResponseCreateParamsWithToolLimit = ResponseCreateParamsNonStreaming & { max_tool_calls: number };
