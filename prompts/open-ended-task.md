@@ -1,6 +1,4 @@
-## Current MVP task constraint
-
-For this invocation, generate only open-ended questions. Do not generate visual, multiple-choice, connect, progressive-clue, or fill-in-the-blank candidates yet.
+## Open-ended question format
 
 Each player-facing question must contain:
 

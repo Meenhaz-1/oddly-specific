@@ -12,7 +12,8 @@ const generatorExamples = loadPrompt('generator-examples.md');
 const evaluatorTemplate = loadPrompt('evaluator.md');
 const evaluatorExamples = loadPrompt('evaluator-examples.md');
 const openEndedTask = loadPrompt('open-ended-task.md');
-const canonicalGeneratorPrompt = `${generatorTemplate}\n\n${generatorExamples}\n\n${openEndedTask}`;
+const progressiveCluesTask = loadPrompt('progressive-clues-task.md');
+const canonicalGeneratorPrompt = `${generatorTemplate}\n\n${generatorExamples}\n\n${openEndedTask}\n\n${progressiveCluesTask}`;
 const canonicalEvaluatorPrompt = `${evaluatorTemplate}\n\n${evaluatorExamples}`;
 
 export interface CanonicalPromptDefinition {
@@ -26,7 +27,12 @@ export function getCanonicalPromptDefinitions(): CanonicalPromptDefinition[] {
     {
       key: 'generator',
       template: canonicalGeneratorPrompt,
-      sourcePaths: ['prompts/generator.md', 'prompts/generator-examples.md', 'prompts/open-ended-task.md'],
+      sourcePaths: [
+        'prompts/generator.md',
+        'prompts/generator-examples.md',
+        'prompts/open-ended-task.md',
+        'prompts/progressive-clues-task.md',
+      ],
     },
     {
       key: 'evaluator',

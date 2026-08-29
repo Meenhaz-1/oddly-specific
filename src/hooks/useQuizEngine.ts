@@ -1,7 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { GENERATED_QUESTION_COUNT, RANDOM_QUESTION_COUNT } from '../constants';
+import { GENERATED_QUESTION_COUNT, PROGRESSIVE_CLUES_CONTEXT, RANDOM_QUESTION_COUNT } from '../constants';
 import { QUESTION_BANK } from '../data/questions';
-import type { GeneratedQuiz, OpenEndedQuestion, QuizActions, QuizQuestion, QuizState, RandomQuizResponse, SeenState } from '../types';
+import type {
+  GeneratedQuestion,
+  GeneratedQuiz,
+  OpenEndedQuestion,
+  ProgressiveCluesQuestion,
+  QuizActions,
+  QuizQuestion,
+  QuizState,
+  RandomQuizResponse,
+  SeenState,
+  SharedQuizResponse,
+} from '../types';
 
 // Reveal-curtain animation duration (ms). Matches the design's default.
 export const REVEAL_MS = 620;
@@ -35,6 +46,7 @@ const initialState: QuizState = {
   seen: {},
   shareStatus: '',
   questions: null,
+  runId: null,
   teaser: '',
   generationError: '',
   randomLoading: false,
@@ -71,6 +83,38 @@ function isOpenEndedQuestion(value: unknown): value is OpenEndedQuestion {
   );
 }
 
+function isProgressiveCluesQuestion(value: unknown): value is ProgressiveCluesQuestion {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.questionId === 'string' &&
+    typeof value.id === 'string' &&
+    typeof value.position === 'number' &&
+    typeof value.label === 'string' &&
+    value.format === 'progressive_clues' &&
+    typeof value.prompt === 'string' &&
+    Array.isArray(value.clues) &&
+    value.clues.length === 3 &&
+    value.clues.every((clue) => typeof clue === 'string') &&
+    isRecord(value.answer) &&
+    typeof value.answer.short === 'string' &&
+    typeof value.answer.explanation === 'string' &&
+    Array.isArray(value.sources) &&
+    value.sources.length > 0 &&
+    value.sources.every(
+      (source) =>
+        isRecord(source) &&
+        typeof source.id === 'string' &&
+        typeof source.title === 'string' &&
+        typeof source.publisher === 'string' &&
+        typeof source.url === 'string',
+    )
+  );
+}
+
+function isGeneratedQuestion(value: unknown): value is GeneratedQuestion {
+  return isOpenEndedQuestion(value) || isProgressiveCluesQuestion(value);
+}
+
 function isGeneratedQuiz(value: unknown): value is GeneratedQuiz {
   return (
     isRecord(value) &&
@@ -79,7 +123,9 @@ function isGeneratedQuiz(value: unknown): value is GeneratedQuiz {
     typeof value.teaser === 'string' &&
     Array.isArray(value.questions) &&
     value.questions.length === GENERATED_QUESTION_COUNT &&
-    value.questions.every(isOpenEndedQuestion)
+    value.questions.every(isGeneratedQuestion) &&
+    value.questions.filter((question) => question.format === 'open_ended').length === 1 &&
+    value.questions.filter((question) => question.format === 'progressive_clues').length === 1
   );
 }
 
@@ -96,21 +142,40 @@ function isRandomQuizResponse(value: unknown): value is RandomQuizResponse {
   );
 }
 
-function toQuizQuestions(questions: OpenEndedQuestion[]): QuizQuestion[] {
-  return questions.map((generated) => ({
-    questionId: generated.questionId,
-    label: generated.label,
-    kind: 'text',
-    setup: generated.context,
-    ask: generated.prompt,
-    answer: generated.answer.short,
-    explain: generated.answer.explanation,
-    sources: generated.sources.map((source) => ({
-      title: source.title,
-      meta: source.publisher,
-      url: source.url,
-    })),
-  }));
+function toQuizQuestions(questions: GeneratedQuestion[]): QuizQuestion[] {
+  return questions.map((generated) => {
+    const shared = {
+      questionId: generated.questionId,
+      label: generated.label,
+      ask: generated.prompt,
+      answer: generated.answer.short,
+      explain: generated.answer.explanation,
+      sources: generated.sources.map((source) => ({
+        title: source.title,
+        meta: source.publisher,
+        url: source.url,
+      })),
+    };
+    if (generated.format === 'progressive_clues') {
+      return {
+        ...shared,
+        kind: 'clues',
+        setup: PROGRESSIVE_CLUES_CONTEXT,
+        clues: generated.clues.map((text, index) => ({
+          tag: `CLUE ${['ONE', 'TWO', 'THREE'][index]}`,
+          text,
+        })),
+      };
+    }
+    return { ...shared, kind: 'text', setup: generated.context };
+  });
+}
+
+function isSharedQuizResponse(value: unknown): value is SharedQuizResponse {
+  if (!isGeneratedQuiz(value)) return false;
+  const topic = (value as GeneratedQuiz & { topic?: unknown }).topic;
+  return typeof value.runId === 'string' && uuidPattern.test(value.runId)
+    && typeof topic === 'string' && topic.length > 0;
 }
 
 function getRandomSeenIds(): string[] {
@@ -140,8 +205,9 @@ function getInitialState(): QuizState {
   if (typeof window === 'undefined') return initialState;
   const params = new URLSearchParams(window.location.search);
 
-  if (params.get('quiz') === 'editorial-demo') {
-    return { ...initialState, screen: 'intro', topic: params.get('topic') || initialState.topic };
+  const sharedRunId = params.get('run');
+  if (sharedRunId && uuidPattern.test(sharedRunId)) {
+    return { ...initialState, screen: 'making', topic: 'this shared set', runId: sharedRunId };
   }
 
   const path = window.location.pathname.replace(/\/+$/, '') || HOME_PATH;
@@ -178,6 +244,7 @@ function getInitialState(): QuizState {
  */
 export function useQuizEngine() {
   const [state, setState] = useState(getInitialState);
+  const [sharedLoadAttempt, setSharedLoadAttempt] = useState(0);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
@@ -200,6 +267,42 @@ export function useQuizEngine() {
     const { viewer: _viewer, roll: _roll, slide: _slide, shareStatus: _shareStatus, ...persisted } = state;
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted));
   }, [state]);
+
+  useEffect(() => {
+    if (state.screen !== 'making' || !state.runId) return;
+    const controller = new AbortController();
+    const runId = state.runId;
+    void (async () => {
+      try {
+        const apiResponse = await fetch(`/api/quizzes/${encodeURIComponent(runId)}`, { signal: controller.signal });
+        const result: unknown = await apiResponse.json().catch(() => null);
+        if (!apiResponse.ok) {
+          const apiError = isRecord(result) && typeof result.error === 'string'
+            ? result.error
+            : 'Could not load this shared quiz.';
+          throw new Error(apiError);
+        }
+        if (!isSharedQuizResponse(result) || result.runId !== runId) {
+          throw new Error('The shared quiz was incomplete or malformed.');
+        }
+        setState((current) => ({
+          ...current,
+          screen: 'intro',
+          quizMode: 'generated',
+          topic: result.topic,
+          questions: toQuizQuestions(result.questions),
+          teaser: result.teaser,
+          generationError: '',
+        }));
+        window.history.replaceState({}, '', QUIZ_PATH);
+        window.scrollTo(0, 0);
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') return;
+        setState((current) => ({ ...current, generationError: errorMessage(error) }));
+      }
+    })();
+    return () => controller.abort();
+  }, [sharedLoadAttempt, state.screen, state.runId]);
 
   const after = useCallback((ms: number, fn: () => void) => {
     const id = setTimeout(fn, ms);
@@ -246,6 +349,7 @@ export function useQuizEngine() {
       votes: {},
       seen: {},
       questions: null,
+      runId: null,
       teaser: '',
       generationError: '',
       randomLoading: false,
@@ -264,7 +368,7 @@ export function useQuizEngine() {
       }
       if (!isGeneratedQuiz(result)) throw new Error('The generated set was incomplete or malformed.');
       const questions = toQuizQuestions(result.questions);
-      patch({ questions, teaser: result.teaser, screen: 'intro' });
+      patch({ questions, runId: result.runId || null, teaser: result.teaser, screen: 'intro' });
       navigate(QUIZ_PATH);
       window.scrollTo(0, 0);
     } catch (error) {
@@ -310,6 +414,7 @@ export function useQuizEngine() {
         votes: {},
         seen: {},
         questions: toQuizQuestions(result.questions),
+        runId: null,
         teaser: result.teaser,
         generationError: '',
         randomLoading: false,
@@ -405,7 +510,14 @@ export function useQuizEngine() {
       navigate(HOME_PATH);
       window.scrollTo(0, 0);
     },
-    retryGeneration: () => begin(state.topic),
+    retryGeneration: () => {
+      if (state.runId) {
+        patch({ generationError: '' });
+        setSharedLoadAttempt((attempt) => attempt + 1);
+        return;
+      }
+      void begin(state.topic);
+    },
     randomQuiz: () => {
       if (!state.randomLoading) void beginRandom();
     },
@@ -417,17 +529,22 @@ export function useQuizEngine() {
     },
     relatedTopic: () => begin(state.topic.toLowerCase().includes('india') ? 'World history' : 'Everyday objects'),
     share: async () => {
-      const url = `${window.location.origin}${window.location.pathname}?quiz=editorial-demo&topic=${encodeURIComponent(state.topic)}`;
+      if (!state.runId) {
+        patch({ shareStatus: 'This quiz is not available to share' });
+        return;
+      }
+      const url = new URL(HOME_PATH, window.location.origin);
+      url.searchParams.set('run', state.runId);
       try {
         if (navigator.share) {
           await navigator.share({
             title: `${bank.length} Questions on ${state.topic}`,
             text: `${bank.length} questions worth working out.`,
-            url,
+            url: url.toString(),
           });
           patch({ shareStatus: 'Shared' });
         } else {
-          await navigator.clipboard.writeText(url);
+          await navigator.clipboard.writeText(url.toString());
           patch({ shareStatus: 'Link copied' });
         }
       } catch (error) {

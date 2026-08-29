@@ -1,6 +1,13 @@
 import { createHash } from 'node:crypto';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { GeneratedQuiz, OpenEndedQuestion, RandomQuizResponse } from '../src/types';
+import type {
+  GeneratedQuestion,
+  GeneratedQuiz,
+  OpenEndedQuestion,
+  RandomQuizResponse,
+  SharedQuizResponse,
+} from '../src/types';
+import { PROGRESSIVE_CLUES_CONTEXT } from '../src/constants.js';
 import { getCanonicalPromptDefinitions } from './prompts.js';
 
 export interface ResponseAudit {
@@ -44,6 +51,7 @@ export interface PersistedEvaluation {
     applied: boolean;
     context: string;
     prompt: string;
+    clues: string[];
     answerShort: string;
     answerExplanation: string;
     score: number;
@@ -179,7 +187,11 @@ export async function persistGeneratedQuiz(input: GeneratedQuizPersistenceInput)
           generationWebSearchCalls: input.generation.webSearchCalls,
           generationDurationMs: input.generation.durationMs,
         },
-        p_questions: input.quiz.questions,
+        p_questions: input.quiz.questions.map((question) =>
+          question.format === 'progressive_clues'
+            ? { ...question, context: PROGRESSIVE_CLUES_CONTEXT }
+            : question,
+        ),
       });
       if (result.error) throw result.error;
       const cacheMetrics = await getAdminClient()
@@ -268,6 +280,98 @@ export async function saveQuestionFeedback(questionId: string, sessionId: string
       );
     if (result.error) throw result.error;
   });
+}
+
+interface SharedQuizRunRow {
+  id: string;
+  topic: string;
+  question_count: number;
+}
+
+interface SharedQuizQuestionRow {
+  id: string;
+  candidate_id: string;
+  position: number;
+  label: string;
+  format: 'open_ended' | 'progressive_clues';
+  context: string;
+  prompt: string;
+  answer_short: string;
+  answer_explanation: string;
+  raw_question: Record<string, unknown> | null;
+}
+
+interface SharedQuizSourceRow {
+  question_id: string;
+  source_key: string;
+  title: string;
+  publisher: string;
+  url: string;
+}
+
+export async function fetchSharedQuiz(runId: string): Promise<SharedQuizResponse | null> {
+  if (!isSupabaseConfigured()) throw new Error('Supabase is not configured.');
+  const client = getAdminClient();
+  const runResult = await client
+    .from('quiz_runs')
+    .select('id, topic, question_count')
+    .eq('id', runId)
+    .maybeSingle();
+  if (runResult.error) throw runResult.error;
+  if (!runResult.data) return null;
+
+  const run = runResult.data as SharedQuizRunRow;
+  const questionResult = await client
+    .from('questions')
+    .select('id, candidate_id, position, label, format, context, prompt, answer_short, answer_explanation, raw_question')
+    .eq('quiz_run_id', runId)
+    .order('position');
+  if (questionResult.error) throw questionResult.error;
+  const questionRows = (questionResult.data || []) as SharedQuizQuestionRow[];
+  if (questionRows.length !== run.question_count) return null;
+
+  const questionIds = questionRows.map((question) => question.id);
+  const sourceResult = await client
+    .from('question_sources')
+    .select('question_id, source_key, title, publisher, url')
+    .in('question_id', questionIds)
+    .order('created_at');
+  if (sourceResult.error) throw sourceResult.error;
+  const sourceRows = (sourceResult.data || []) as SharedQuizSourceRow[];
+
+  const questions = questionRows.map((row) => {
+    const stored = row.raw_question || {};
+    const sources = sourceRows
+      .filter((source) => source.question_id === row.id)
+      .map((source) => ({
+        id: source.source_key,
+        title: source.title,
+        publisher: source.publisher,
+        url: source.url,
+      }));
+    const base = {
+      ...stored,
+      questionId: row.id,
+      id: row.candidate_id,
+      position: row.position,
+      label: row.label,
+      format: row.format,
+      prompt: row.prompt,
+      answer: { short: row.answer_short, explanation: row.answer_explanation },
+      sources,
+    };
+    return row.format === 'progressive_clues'
+      ? base
+      : { ...base, context: row.context };
+  }) as GeneratedQuestion[];
+
+  return {
+    runId: run.id,
+    topic: run.topic,
+    title: `${questions.length} Questions on ${run.topic}`,
+    teaser: `The original ${questions.length}-question set, saved exactly as it was generated.`,
+    questions,
+  };
 }
 
 interface RandomArchiveRow {

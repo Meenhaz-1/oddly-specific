@@ -148,6 +148,7 @@ sources per question when art is sourced.
   Responses API with web search and Structured Outputs. The single-call
   prototype still needs the PRD's separate research, critique, verification,
   and ranking stages before production launch.
-- **Shared links are still demo-only.** Generated questions and player feedback
-  are persisted, but shared URLs do not yet load a saved run by ID.
+- **Saved-run sharing.** Generated questions and player feedback
+  are persisted, and generated sets can be shared by run ID so recipients load
+  the same stored questions instead of regenerating a demo topic.
 - **No real photography** — see Content, above.
