@@ -42,7 +42,12 @@ export interface GeneratedQuiz {
   runId?: string;
   title: string;
   teaser: string;
-  questions: OpenEndedQuestion[];
+  questions: GeneratedQuestion[];
+}
+
+export interface SharedQuizResponse extends GeneratedQuiz {
+  runId: string;
+  topic: string;
 }
 
 export interface RandomQuizResponse {
@@ -75,6 +80,26 @@ export interface OpenEndedQuestion {
   sources: OpenEndedSource[];
 }
 
+export type ProgressiveClues = [string, string, string];
+
+export interface ProgressiveCluesQuestion {
+  questionId?: string;
+  topic?: string;
+  id: string;
+  position: number;
+  label: string;
+  format: 'progressive_clues';
+  prompt: string;
+  clues: ProgressiveClues;
+  answer: {
+    short: string;
+    explanation: string;
+  };
+  sources: OpenEndedSource[];
+}
+
+export type GeneratedQuestion = OpenEndedQuestion | ProgressiveCluesQuestion;
+
 export type QuizScreen = 'landing' | 'making' | 'intro' | 'quiz' | 'done';
 export type QuizMode = 'generated' | 'random';
 export type RevealStage = 0 | 1 | 2;
@@ -101,6 +126,7 @@ export interface QuizState {
   seen: Record<number, SeenState>;
   shareStatus: string;
   questions: QuizQuestion[] | null;
+  runId: string | null;
   teaser: string;
   generationError: string;
   randomLoading: boolean;

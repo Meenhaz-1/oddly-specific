@@ -5,7 +5,8 @@ import OpenAI from 'openai';
 import { waitUntil } from '@vercel/functions';
 import type { InputTokenCountParams } from 'openai/resources/responses/input-tokens';
 import type { ResponseCreateParamsNonStreaming } from 'openai/resources/responses/responses';
-import type { GeneratedQuiz, OpenEndedQuestion } from './src/types';
+import type { GeneratedQuestion, GeneratedQuiz, OpenEndedQuestion, ProgressiveCluesQuestion } from './src/types';
+import { GENERATED_QUESTION_COUNT } from './src/constants.js';
 import {
   buildEvaluatorInput,
   buildGeneratorInput,
@@ -18,10 +19,13 @@ import {
   applyEvaluationRewrite,
   deduplicateQuestionsByShortAnswer,
   validateGeneratedQuiz,
+  validateGeneratedQuestion,
   validatePlayerFacingQuestion,
 } from './server/question-validation.js';
+import { createMixedQuizGenerationSchema } from './server/question-schemas.js';
 import {
   fetchRandomArchiveQuiz,
+  fetchSharedQuiz,
   isSupabaseConfigured,
   markEvaluationFailed,
   persistEvaluations,
@@ -190,6 +194,7 @@ interface CandidateEvaluation {
     applied: boolean;
     context: string;
     prompt: string;
+    clues: string[];
     answerShort: string;
     answerExplanation: string;
     score: number;
@@ -200,7 +205,7 @@ interface EvaluationResult {
   evaluations: CandidateEvaluation[];
 }
 
-function passesShippingBar(evaluation: CandidateEvaluation, question: OpenEndedQuestion): boolean {
+function passesShippingBar(evaluation: CandidateEvaluation, question: GeneratedQuestion): boolean {
   const finalQuestion = applyEvaluationRewrite(question, evaluation.rewrite);
   return (
     evaluation.decision !== 'REJECT' &&
@@ -211,7 +216,7 @@ function passesShippingBar(evaluation: CandidateEvaluation, question: OpenEndedQ
     evaluation.scores.answerPrecision >= 4 &&
     evaluation.factualConfidence !== 'Low' &&
     (!evaluation.rewrite.applied || evaluation.rewrite.score >= 4) &&
-    validatePlayerFacingQuestion(finalQuestion).length === 0
+    validateGeneratedQuestion(finalQuestion).length === 0
   );
 }
 
@@ -358,11 +363,12 @@ function createEvaluationSchema(candidateCount: number) {
             rewrite: {
               type: 'object',
               additionalProperties: false,
-              required: ['applied', 'context', 'prompt', 'answerShort', 'answerExplanation', 'score'],
+              required: ['applied', 'context', 'prompt', 'clues', 'answerShort', 'answerExplanation', 'score'],
               properties: {
                 applied: { type: 'boolean' },
                 context: { type: 'string' },
                 prompt: { type: 'string' },
+                clues: { type: 'array', minItems: 0, maxItems: 3, items: { type: 'string' } },
                 answerShort: { type: 'string' },
                 answerExplanation: { type: 'string' },
                 score: { type: 'number', minimum: 0, maximum: 5 },
@@ -377,7 +383,7 @@ function createEvaluationSchema(candidateCount: number) {
 
 async function evaluateQuestionsInBackground(
   openai: OpenAI,
-  questions: OpenEndedQuestion[],
+  questions: GeneratedQuestion[],
   parentRunId: string,
 ): Promise<{ evaluations: CandidateEvaluation[]; audit: ResponseAudit } | { error: string }> {
   const runId = `${parentRunId}-EVAL`;
@@ -422,7 +428,7 @@ async function evaluateQuestionsInBackground(
       const question = questions.find((candidate) => candidate.id === evaluation.candidateId);
       const ships = question ? passesShippingBar(evaluation, question) : false;
       const copyIssues = question
-        ? validatePlayerFacingQuestion(applyEvaluationRewrite(question, evaluation.rewrite))
+        ? validateGeneratedQuestion(applyEvaluationRewrite(question, evaluation.rewrite))
         : [];
       const rewrite = evaluation.rewrite.applied ? ` | rewrite=${evaluation.rewrite.score.toFixed(1)}` : '';
       console.log(
@@ -516,6 +522,30 @@ app.get('/api/health', (_request, response) => {
   });
 });
 
+app.get('/api/quizzes/:runId', async (request, response) => {
+  const runId = String(request.params.runId || '').trim();
+  if (!uuidPattern.test(runId)) return response.status(400).json({ error: 'Provide a valid quiz run ID.' });
+  if (!isSupabaseConfigured()) return response.status(503).json({ error: 'Shared quizzes are not configured.' });
+
+  try {
+    const quiz = await fetchSharedQuiz(runId);
+    if (!quiz) return response.status(404).json({ error: 'This shared quiz could not be found.' });
+    const playerCopyIssues = validateGeneratedQuiz(quiz);
+    if (playerCopyIssues.length > 0) {
+      console.warn(`[SHARE] Stored quiz ${runId} failed player-copy validation.`, {
+        issues: playerCopyIssues.map(({ code, field }) => ({ code, field })),
+      });
+      return response.status(404).json({ error: 'This shared quiz is unavailable.' });
+    }
+    response.setHeader('Cache-Control', 'public, max-age=60, s-maxage=300');
+    return response.json(quiz);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[SHARE] Could not load run ${runId} | ${message}`);
+    return response.status(502).json({ error: 'Could not load this shared quiz. Please try again.' });
+  }
+});
+
 app.post('/api/random-quiz', async (request, response) => {
   const requestedCount = request.body?.count;
   const exclusions = request.body?.excludeQuestionIds;
@@ -577,8 +607,7 @@ app.put('/api/questions/:questionId/feedback', async (request, response) => {
 
 app.post('/api/generate', async (request, response) => {
   const topicValidation = validateTopic(request.body?.topic);
-  const requestedCount = Number(request.body?.count || 10);
-  const questionCount = Number.isInteger(requestedCount) && requestedCount >= 1 && requestedCount <= 10 ? requestedCount : 10;
+  const questionCount = GENERATED_QUESTION_COUNT;
   if (!topicValidation.valid) return response.status(400).json({ error: topicValidation.error });
   const { topic } = topicValidation;
   if (!process.env.OPENAI_API_KEY) return response.status(503).json({ error: 'OpenAI is not configured. Add OPENAI_API_KEY to .env and restart the server.' });
@@ -595,11 +624,22 @@ app.post('/api/generate', async (request, response) => {
     const generationRequest = withToolCallLimit({
       model: generatorModel,
       instructions: getGeneratorInstructions(),
-      input: buildGeneratorInput(topic, questionCount, 'Generate the requested candidates now.'),
+      input: buildGeneratorInput(
+        topic,
+        questionCount,
+        'Generate exactly two questions in the named schema fields: q01 must be one open-ended question and q02 must be one progressive three-clue question. Return both now.',
+      ),
       ...promptCacheConfig(generatorModel, generatorPromptCacheKey),
       tools: [{ type: 'web_search' }],
       reasoning: { effort: 'medium' },
-      text: { format: { type: 'json_schema', name: 'verified_quiz', strict: true, schema: createQuizSchema(questionCount) } },
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'mixed_verified_quiz',
+          strict: true,
+          schema: createMixedQuizGenerationSchema(),
+        },
+      },
       max_output_tokens: 14000,
       store: false,
     }, 2);
@@ -607,12 +647,21 @@ app.post('/api/generate', async (request, response) => {
     const result = await openai.responses.create(generationRequest);
     const initialInputTokens = await initialInputPromise;
 
-    const generatedQuiz = JSON.parse(result.output_text) as GeneratedQuiz;
+    const generatedQuiz = JSON.parse(result.output_text) as {
+      title: string;
+      teaser: string;
+      openEndedQuestion: OpenEndedQuestion;
+      progressiveCluesQuestion: ProgressiveCluesQuestion;
+    };
     const databaseRunId = randomUUID();
     const quiz: GeneratedQuiz = {
-      ...generatedQuiz,
+      title: generatedQuiz.title,
+      teaser: generatedQuiz.teaser,
       runId: databaseRunId,
-      questions: generatedQuiz.questions.map((question) => ({ ...question, questionId: randomUUID() })),
+      questions: [generatedQuiz.openEndedQuestion, generatedQuiz.progressiveCluesQuestion].map((question) => ({
+        ...question,
+        questionId: randomUUID(),
+      })),
     };
     const playerCopyIssues = validateGeneratedQuiz(quiz);
     if (playerCopyIssues.length > 0) {
@@ -715,7 +764,7 @@ app.post('/api/pipeline-test', async (request, response) => {
         max_output_tokens: 6000,
         store: false,
       }, 1));
-      const generated = JSON.parse(generationResponse.output_text) as GeneratedQuiz;
+      const generated = JSON.parse(generationResponse.output_text) as { questions: OpenEndedQuestion[] };
       const rawCandidate = generated.questions[0];
       if (!rawCandidate) throw new Error(`Generator returned no question for ${candidateId}.`);
       const candidate: OpenEndedQuestion = {

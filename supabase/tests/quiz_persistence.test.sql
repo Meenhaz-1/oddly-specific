@@ -1,5 +1,5 @@
 begin;
-select plan(46);
+select plan(49);
 
 select has_table('public', 'prompt_versions', 'prompt_versions exists');
 select has_table('public', 'quiz_runs', 'quiz_runs exists');
@@ -111,6 +111,44 @@ insert into public.question_evaluations (
     '77777777-7777-4777-8777-777777777777', 'REJECT', 2, 2, 2, 2,
     2, 2, 2.0, 'Medium', 'Rejected question does not ship.', '{}', '[]'::jsonb, false, 0, false, '{}'::jsonb
   );
+
+select lives_ok(
+  $$insert into public.questions (
+      id, quiz_run_id, candidate_id, position, label, format, context, prompt,
+      answer_short, answer_explanation, raw_question
+    ) values (
+      '88888888-8888-4888-8888-888888888888', '33333333-3333-4333-8333-333333333333',
+      'q04', 4, '3 CLUES', 'progressive_clues', 'Three clues, one answer. Pull them one at a time.',
+      'What is it?', 'Progressive answer', 'Progressive explanation.',
+      '{"clues":["First clue.","Second clue.","Third clue."]}'::jsonb
+    )$$,
+  'progressive clue questions can be stored'
+);
+select results_eq(
+  $$select raw_question->'clues'->>1 from public.questions where id = '88888888-8888-4888-8888-888888888888'$$,
+  array['Second clue.'::text],
+  'progressive clues remain available in raw question data'
+);
+
+insert into public.question_sources (question_id, source_key, title, publisher, url) values
+  ('88888888-8888-4888-8888-888888888888', 's04a', 'Progressive source', 'Test publisher', 'https://example.com/progressive');
+
+insert into public.question_evaluations (
+  question_id, decision, solvability, reveal_quality, clue_discipline, originality,
+  answer_precision, wording_efficiency, overall, factual_confidence, decision_rationale,
+  clue_leakage_issues, alternative_answers, rewrite_applied, rewrite_score, ships, raw_evaluation
+) values (
+  '88888888-8888-4888-8888-888888888888', 'ACCEPT', 5, 5, 5, 4,
+  5, 5, 4.8, 'High', 'Progressive question ships outside the open archive.', '{}', '[]'::jsonb,
+  false, 0, true, '{}'::jsonb
+);
+
+select results_eq(
+  $$select count(*)::integer from public.get_random_archive_questions(10, '{}'::uuid[])
+    where question_id = '88888888-8888-4888-8888-888888888888'::uuid$$,
+  array[0],
+  'progressive questions stay out of the open-ended archive response'
+);
 
 update public.question_evaluations
 set rewrite_applied = true,

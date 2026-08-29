@@ -88,6 +88,19 @@ Can this be shorter without losing fairness?
 **3:** Fine but could tighten  
 **5:** Elegant and efficient
 
+### Progressive three-clue questions
+
+When `format` is `progressive_clues`, additionally verify:
+
+- there are exactly three clues
+- clue one is broad but genuinely useful
+- clue two narrows through a different dimension rather than repeating clue one
+- clue three is decisive without defining or effectively stating the answer
+- every clue is no more than 24 words and directly source-supported
+- the prompt and all three clues together lead to one precise answer
+
+Treat the fixed interface instruction as presentation only; it is not a factual clue. For open-ended questions, continue using the normal criteria above.
+
 ### 7. Visual value
 
 Only score if visual.
@@ -186,6 +199,8 @@ The rewrite should:
 - contain only plain player-facing text, with no URLs, domain names, Markdown links, citations, source labels, or footnote markers
 
 Then rerun every hard-fail check against the rewritten `context`, `prompt`, `answerShort`, and `answerExplanation`, including the literal-answer and player-copy hygiene tests. Do not assume a rewrite is safe because the original problem was identified. If the rewritten short answer appears in the rewritten stem, or any rewritten player-facing field contains source markup or a URL, the rewrite fails.
+
+For `progressive_clues`, leave rewritten `context` empty and return exactly three rewritten clue strings. Rerun the checks against the rewritten `prompt`, all three rewritten clues, `answerShort`, and `answerExplanation`. For `open_ended`, return an empty rewritten clue array.
 
 If it still fails, reject it.
 

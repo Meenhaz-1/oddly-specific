@@ -1,6 +1,12 @@
-import type { GeneratedQuiz, OpenEndedQuestion } from '../src/types.js';
+import type { GeneratedQuestion, OpenEndedQuestion, ProgressiveCluesQuestion } from '../src/types.js';
 
-export type PlayerCopyIssueCode = 'answer_leak' | 'duplicate_answer' | 'url_or_markdown_link';
+export type PlayerCopyIssueCode =
+  | 'answer_leak'
+  | 'clue_too_long'
+  | 'duplicate_answer'
+  | 'duplicate_clue'
+  | 'invalid_clue_count'
+  | 'url_or_markdown_link';
 
 export interface PlayerCopyIssue {
   code: PlayerCopyIssueCode;
@@ -17,12 +23,16 @@ function normalizeForExactMatch(value: string): string {
     .trim();
 }
 
-function hasExactAnswerLeak(question: OpenEndedQuestion): boolean {
-  const answer = normalizeForExactMatch(question.answer.short);
+function containsExactAnswer(answerText: string, stemParts: string[]): boolean {
+  const answer = normalizeForExactMatch(answerText);
   if (answer.length < 3) return false;
 
-  const stem = normalizeForExactMatch(`${question.context} ${question.prompt}`);
+  const stem = normalizeForExactMatch(stemParts.join(' '));
   return ` ${stem} `.includes(` ${answer} `);
+}
+
+function wordCount(value: string): number {
+  return value.trim().split(/\s+/u).filter(Boolean).length;
 }
 
 export function validatePlayerFacingQuestion(question: OpenEndedQuestion): PlayerCopyIssue[] {
@@ -37,11 +47,53 @@ export function validatePlayerFacingQuestion(question: OpenEndedQuestion): Playe
   for (const [field, value] of fields) {
     if (URL_OR_MARKDOWN_LINK.test(value)) issues.push({ code: 'url_or_markdown_link', field });
   }
-  if (hasExactAnswerLeak(question)) issues.push({ code: 'answer_leak', field: 'context_or_prompt' });
+  if (containsExactAnswer(question.answer.short, [question.context, question.prompt])) {
+    issues.push({ code: 'answer_leak', field: 'context_or_prompt' });
+  }
   return issues;
 }
 
-export function validateGeneratedQuiz(quiz: GeneratedQuiz): PlayerCopyIssue[] {
+export function validateProgressiveCluesQuestion(question: ProgressiveCluesQuestion): PlayerCopyIssue[] {
+  const issues: PlayerCopyIssue[] = [];
+  const fields = [
+    ['prompt', question.prompt],
+    ...question.clues.map((clue, index) => [`clues.${index}`, clue] as const),
+    ['answer.short', question.answer.short],
+    ['answer.explanation', question.answer.explanation],
+  ] as const;
+
+  if (question.clues.length !== 3) issues.push({ code: 'invalid_clue_count', field: 'clues' });
+  for (const [field, value] of fields) {
+    if (URL_OR_MARKDOWN_LINK.test(value)) issues.push({ code: 'url_or_markdown_link', field });
+  }
+
+  const seenClues = new Set<string>();
+  for (const [index, clue] of question.clues.entries()) {
+    if (wordCount(clue) > 24) issues.push({ code: 'clue_too_long', field: `clues.${index}` });
+    const clueKey = normalizeForExactMatch(clue);
+    if (clueKey && seenClues.has(clueKey)) issues.push({ code: 'duplicate_clue', field: `clues.${index}` });
+    seenClues.add(clueKey);
+  }
+
+  if (containsExactAnswer(question.answer.short, [question.prompt, ...question.clues])) {
+    issues.push({ code: 'answer_leak', field: 'prompt_or_clues' });
+  }
+  return issues;
+}
+
+export function validateGeneratedQuestion(question: GeneratedQuestion): PlayerCopyIssue[] {
+  return question.format === 'progressive_clues'
+    ? validateProgressiveCluesQuestion(question)
+    : validatePlayerFacingQuestion(question);
+}
+
+interface GeneratedQuizLike {
+  title: string;
+  teaser: string;
+  questions: GeneratedQuestion[];
+}
+
+export function validateGeneratedQuiz(quiz: GeneratedQuizLike): PlayerCopyIssue[] {
   const issues: PlayerCopyIssue[] = [];
   const seenAnswers = new Set<string>();
   if (URL_OR_MARKDOWN_LINK.test(quiz.title)) issues.push({ code: 'url_or_markdown_link', field: 'title' });
@@ -52,14 +104,14 @@ export function validateGeneratedQuiz(quiz: GeneratedQuiz): PlayerCopyIssue[] {
       issues.push({ code: 'duplicate_answer', field: `${question.id}.answer.short` });
     }
     seenAnswers.add(answerKey);
-    for (const issue of validatePlayerFacingQuestion(question)) {
+    for (const issue of validateGeneratedQuestion(question)) {
       issues.push({ ...issue, field: `${question.id}.${issue.field}` });
     }
   }
   return issues;
 }
 
-export function deduplicateQuestionsByShortAnswer(questions: OpenEndedQuestion[]): OpenEndedQuestion[] {
+export function deduplicateQuestionsByShortAnswer<Question extends GeneratedQuestion>(questions: Question[]): Question[] {
   const seenAnswers = new Set<string>();
   return questions.filter((question) => {
     const answerKey = normalizeForExactMatch(question.answer.short);
@@ -69,17 +121,31 @@ export function deduplicateQuestionsByShortAnswer(questions: OpenEndedQuestion[]
   });
 }
 
-export function applyEvaluationRewrite(
-  question: OpenEndedQuestion,
-  rewrite: {
-    applied: boolean;
-    context: string;
-    prompt: string;
-    answerShort: string;
-    answerExplanation: string;
-  },
-): OpenEndedQuestion {
+export interface EvaluationRewrite {
+  applied: boolean;
+  context: string;
+  prompt: string;
+  clues: string[];
+  answerShort: string;
+  answerExplanation: string;
+}
+
+export function applyEvaluationRewrite<Question extends GeneratedQuestion>(
+  question: Question,
+  rewrite: EvaluationRewrite,
+): Question {
   if (!rewrite.applied) return question;
+  if (question.format === 'progressive_clues') {
+    return {
+      ...question,
+      prompt: rewrite.prompt,
+      clues: rewrite.clues,
+      answer: {
+        short: rewrite.answerShort,
+        explanation: rewrite.answerExplanation,
+      },
+    } as Question;
+  }
   return {
     ...question,
     context: rewrite.context,
@@ -88,5 +154,5 @@ export function applyEvaluationRewrite(
       short: rewrite.answerShort,
       explanation: rewrite.answerExplanation,
     },
-  };
+  } as Question;
 }
