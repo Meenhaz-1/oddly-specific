@@ -28,13 +28,13 @@ The underlying fact is strong, but rewrite when the stem explains that the real 
 
 ## REJECT patterns
 
-### The at-sign in email
+### Repeatedly stating the answer through different representations
 
-Reject when the stem mentions email, displays the symbol, translates it as "at the rate of," and then asks for the symbol. These clues do not create a route; together they state the answer repeatedly. A rewritten question may use the underlying history only if it can remove the literal and domain giveaways.
+Reject when the stem names the modern domain, displays or describes the identifying feature, translates or defines it, and then asks the player to identify it. Those clues do not create independent routes; together they state the answer repeatedly. Rewriting is justified only when the underlying premise still works after removing both the literal and domain giveaways.
 
-### Bluetooth and Harald Bluetooth
+### A famous association disguised by new wording
 
-Reject the familiar version that describes a Scandinavian king uniting tribes and asks for the wireless technology. It is a common quiz chestnut and the metaphor makes the answer too familiar. A fresh, independently solvable construction would need genuinely new evidence, not merely different wording.
+Reject when a widely repeated origin, biography, metaphor, demonstration, or design story is paired with the answer it is conventionally used to explain. Rephrasing the setup or asking for the mechanism does not create a fresh construction. A viable rewrite requires a genuinely different central relationship and independently solvable evidence, not merely different wording.
 
 ## Calibration principles
 

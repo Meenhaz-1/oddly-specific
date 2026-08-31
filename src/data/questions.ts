@@ -1,4 +1,5 @@
 import type { QuizQuestion, QuizTopic } from '../types';
+import { TOPIC_CATEGORIES } from '../topic-categories';
 
 // Seed content for the quiz. Each entry is one of the "oddly specific"
 // questions shown in the design prototype. `kind` drives which extra
@@ -179,10 +180,4 @@ export const LANDING_TEASERS: string[] = [
   "Long before cowboys, this patterned cloth reached Europe from India. What's it called today?",
 ];
 
-export const TOPICS: QuizTopic[] = [
-  { name: 'Indian sport', count: 'NEW', tab: '#E4D9B8' },
-  { name: 'Cinema', count: '10', tab: '#CADCD2' },
-  { name: 'World history', count: '10', tab: '#E9D3B2' },
-  { name: 'Science & strange things', count: '10', tab: '#DCD2E0' },
-  { name: 'Video games', count: '10', tab: '#D9DCC6' },
-];
+export const TOPICS: QuizTopic[] = [...TOPIC_CATEGORIES];
