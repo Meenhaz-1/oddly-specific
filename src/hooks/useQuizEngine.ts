@@ -136,8 +136,7 @@ function isRandomQuizResponse(value: unknown): value is RandomQuizResponse {
     typeof value.teaser === 'string' &&
     typeof value.resetExclusions === 'boolean' &&
     Array.isArray(value.questions) &&
-    value.questions.length >= 1 &&
-    value.questions.length <= RANDOM_QUESTION_COUNT &&
+    value.questions.length === RANDOM_QUESTION_COUNT &&
     value.questions.every((question) => isOpenEndedQuestion(question) && typeof question.topic === 'string')
   );
 }

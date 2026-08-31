@@ -1,5 +1,5 @@
 begin;
-select plan(73);
+select plan(75);
 
 select has_table('public', 'prompt_versions', 'prompt_versions exists');
 select has_table('public', 'quiz_runs', 'quiz_runs exists');
@@ -184,17 +184,19 @@ select results_eq(
   'only the two shipped questions are eligible'
 );
 select results_eq(
-  $$select question_id from public.get_random_archive_questions(10, array['44444444-4444-4444-8444-444444444444'::uuid])$$,
-  array['66666666-6666-4666-8666-666666666666'::uuid],
-  'excluded question IDs are omitted while unseen questions remain'
+  $$select count(*)::integer from public.get_random_archive_questions(10, array['44444444-4444-4444-8444-444444444444'::uuid])$$,
+  array[2],
+  'excluded questions refill a set when too few unseen questions remain'
 );
 select results_eq(
-  $$select context from public.get_random_archive_questions(10, array['66666666-6666-4666-8666-666666666666'::uuid])$$,
+  $$select context from public.get_random_archive_questions(10, array['66666666-6666-4666-8666-666666666666'::uuid])
+    where question_id = '44444444-4444-4444-8444-444444444444'::uuid$$,
   array['Rewritten context.'::text],
   'approved rewrite text takes precedence'
 );
 select results_eq(
-  $$select sources->0->>'title' from public.get_random_archive_questions(10, array['66666666-6666-4666-8666-666666666666'::uuid])$$,
+  $$select sources->0->>'title' from public.get_random_archive_questions(10, array['66666666-6666-4666-8666-666666666666'::uuid])
+    where question_id = '44444444-4444-4444-8444-444444444444'::uuid$$,
   array['Test source'::text],
   'archive questions include their sources'
 );
@@ -344,6 +346,62 @@ select results_eq(
   $$select sources from public.get_random_archive_questions(10, '{}'::uuid[]) where question_id = (select promoted_question_id from public.reference_question_candidates where id = '99999999-9999-4999-8999-999999999998')$$,
   array['[]'::jsonb],
   'source-free curated questions remain archive eligible with an empty sources array'
+);
+
+insert into public.questions (
+  id, quiz_run_id, candidate_id, position, label, format, context, prompt,
+  answer_short, answer_explanation, raw_question
+) values
+  (
+    'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1', '33333333-3333-4333-8333-333333333333',
+    'invalid-leak', 5, 'INVALID', 'open_ended', 'This context directly names Leaked Answer.',
+    'What is named?', 'Leaked Answer', 'An otherwise valid explanation.', '{}'::jsonb
+  ),
+  (
+    'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2', '33333333-3333-4333-8333-333333333333',
+    'invalid-url', 6, 'INVALID', 'open_ended', 'A context without an answer leak.',
+    'What is it?', 'URL answer', 'Read https://example.com inside the player-facing explanation.', '{}'::jsonb
+  ),
+  (
+    'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3', '33333333-3333-4333-8333-333333333333',
+    'duplicate-answer', 7, 'DUPLICATE', 'open_ended', 'A separate valid context for a duplicate response.',
+    'What is the response?', 'Rewritten answer', 'A separate explanation.', '{}'::jsonb
+  );
+
+insert into public.question_sources (question_id, source_key, title, publisher, url) values
+  ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1', 'invalid-leak-source', 'Source', 'Publisher', 'https://example.com/leak'),
+  ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2', 'invalid-url-source', 'Source', 'Publisher', 'https://example.com/url'),
+  ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3', 'duplicate-source', 'Source', 'Publisher', 'https://example.com/duplicate');
+
+insert into public.question_evaluations (
+  question_id, decision, solvability, reveal_quality, clue_discipline, originality,
+  answer_precision, wording_efficiency, overall, factual_confidence, decision_rationale,
+  clue_leakage_issues, alternative_answers, rewrite_applied, rewrite_score, ships, raw_evaluation
+) select
+  id, 'ACCEPT', 5, 5, 5, 5, 5, 5, 5.0, 'High', 'Fixture ships.', '{}', '[]'::jsonb,
+  false, 0, true, '{}'::jsonb
+from public.questions
+where id in (
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1',
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2',
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3'
+);
+
+select results_eq(
+  $$select count(*)::integer from public.get_random_archive_questions(10, '{}'::uuid[])
+    where question_id in (
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1'::uuid,
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2'::uuid
+    )$$,
+  array[0],
+  'archive query excludes answer leaks and player-facing URLs'
+);
+
+select results_eq(
+  $$select count(*)::integer from public.get_random_archive_questions(10, '{}'::uuid[])
+    where lower(answer_short) = 'rewritten answer'$$,
+  array[1],
+  'archive query returns only one question for each normalized short answer'
 );
 
 select lives_ok(

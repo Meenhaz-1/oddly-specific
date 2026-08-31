@@ -708,8 +708,11 @@ app.post('/api/random-quiz', async (request, response) => {
     const questions = deduplicateQuestionsByShortAnswer(
       quiz.questions.filter((question) => validatePlayerFacingQuestion(question).length === 0),
     );
-    if (questions.length === 0) {
-      return response.status(404).json({ error: 'The archive does not have any vetted questions yet.' });
+    if (questions.length !== requestedCount) {
+      console.error(`[ARCHIVE] Requested ${requestedCount} questions but only ${questions.length} valid distinct questions were returned.`);
+      return response.status(404).json({
+        error: `The archive does not currently have ${requestedCount} distinct vetted questions available.`,
+      });
     }
     return response.json({
       ...quiz,
