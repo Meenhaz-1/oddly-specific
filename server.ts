@@ -22,7 +22,11 @@ import {
   validateGeneratedQuestion,
   validatePlayerFacingQuestion,
 } from './server/question-validation.js';
-import { createMixedQuizGenerationSchema } from './server/question-schemas.js';
+import {
+  createMixedQuizGenerationSchema,
+  type QuestionResearch,
+} from './server/question-schemas.js';
+import { validateBlueprintPair } from './server/question-blueprints.js';
 import {
   fetchRandomArchiveQuiz,
   fetchSharedQuiz,
@@ -146,6 +150,44 @@ function responseAudit(result: {
   };
 }
 
+function mergeResponseAudits(first: ResponseAudit, second: ResponseAudit, durationMs: number): ResponseAudit {
+  const sumNullable = (left: number | null, right: number | null): number | null =>
+    left === null && right === null ? null : (left ?? 0) + (right ?? 0);
+  const inputTokens = sumNullable(first.inputTokens, second.inputTokens);
+  const cachedInputTokens = sumNullable(first.cachedInputTokens, second.cachedInputTokens);
+  const outputTokens = sumNullable(first.outputTokens, second.outputTokens);
+  const reasoningOutputTokens = sumNullable(first.reasoningOutputTokens, second.reasoningOutputTokens);
+  return {
+    responseId: [first.responseId, second.responseId].filter(Boolean).join(',') || null,
+    inputTokens,
+    initialInputTokens: sumNullable(first.initialInputTokens, second.initialInputTokens),
+    toolLoopInputTokens: sumNullable(first.toolLoopInputTokens, second.toolLoopInputTokens),
+    cachedInputTokens,
+    uncachedInputTokens: inputTokens === null ? null : Math.max(0, inputTokens - (cachedInputTokens ?? 0)),
+    cacheWriteInputTokens: sumNullable(first.cacheWriteInputTokens, second.cacheWriteInputTokens),
+    cacheHitRate: inputTokens ? (cachedInputTokens ?? 0) / inputTokens : null,
+    outputTokens,
+    reasoningOutputTokens,
+    visibleOutputTokens: outputTokens === null ? null : Math.max(0, outputTokens - (reasoningOutputTokens ?? 0)),
+    totalTokens: sumNullable(first.totalTokens, second.totalTokens),
+    webSearchCalls: first.webSearchCalls + second.webSearchCalls,
+    durationMs,
+    promptCacheKey: first.promptCacheKey,
+  };
+}
+
+function responseUsedWebSearch(result: { output?: Array<{ type?: string }> }): boolean {
+  return result.output?.some((item) => item.type === 'web_search_call') ?? false;
+}
+
+function researchRequiresIndependentSearch(research?: QuestionResearch): boolean {
+  return !research ||
+    research.claims.length === 0 ||
+    research.conflictsFound ||
+    research.riskFlags.length > 0 ||
+    research.claims.some((claim) => claim.supportType !== 'direct');
+}
+
 function inputTokenCountParams(params: ResponseCreateParamsNonStreaming): InputTokenCountParams {
   return {
     model: params.model,
@@ -189,6 +231,12 @@ interface CandidateEvaluation {
   clueLeakageIssues: string[];
   alternativeAnswers: Array<{ answer: string; assessment: string }>;
   factualConfidence: 'High' | 'Medium' | 'Low';
+  verification: {
+    mode: 'generator_research' | 'independent_web_search';
+    evidenceStatus: 'complete' | 'incomplete' | 'conflicting';
+    independentSearchRequired: boolean;
+    searchReason: string;
+  };
   decisionRationale: string;
   rewrite: {
     applied: boolean;
@@ -221,11 +269,20 @@ function passesShippingBar(evaluation: CandidateEvaluation, question: GeneratedQ
 }
 
 const candidateDirections = [
-  { label: 'NUMERICAL REASONING', direction: 'numerical or first-principles reasoning' },
+  {
+    label: 'QUANTITATIVE CONSTRAINT',
+    direction: 'a quantitative constraint whose result changes how the subject is understood, not routine arithmetic',
+  },
   { label: 'HIDDEN PURPOSE', direction: 'hidden purpose or overlooked urban mechanism' },
-  { label: 'LINGUISTIC CONNECTION', direction: 'linguistic journey or precise word origin' },
+  {
+    label: 'CROSS-DOMAIN CONNECTION',
+    direction: 'a semantic connection between evidence from different domains; exclude direct etymology or naming recall unless another independent reasoning layer exists',
+  },
   { label: 'REVERSE ENGINEER', direction: 'reverse-engineer a familiar object or artifact' },
-  { label: 'HISTORICAL CONSEQUENCE', direction: 'historical consequence or institutional constraint' },
+  {
+    label: 'HISTORICAL CONSEQUENCE',
+    direction: 'a historical consequence inferred from a constraint, not a standard origin story',
+  },
   { label: 'SCIENTIFIC MECHANISM', direction: 'scientific or biological mechanism' },
   { label: 'ECONOMIC INCENTIVE', direction: 'economic incentive or unintended consequence' },
   { label: 'GEOGRAPHIC INFERENCE', direction: 'geographic inference from an unusual constraint' },
@@ -245,6 +302,17 @@ async function mapWithConcurrency<T, R>(items: T[], concurrency: number, mapper:
   });
   await Promise.all(workers);
   return results;
+}
+
+async function withSingleRetry<T>(label: string, task: () => Promise<T>): Promise<T> {
+  try {
+    return await task();
+  } catch (firstError) {
+    const details = apiErrorDetails(firstError);
+    console.warn(`${label} failed; retrying once.`, details.status || '', details.message);
+    await new Promise((resolve) => setTimeout(resolve, 750));
+    return task();
+  }
 }
 
 app.use(express.json({ limit: '100kb' }));
@@ -326,6 +394,7 @@ function createEvaluationSchema(candidateCount: number) {
             'clueLeakageIssues',
             'alternativeAnswers',
             'factualConfidence',
+            'verification',
             'decisionRationale',
             'rewrite',
           ],
@@ -359,6 +428,17 @@ function createEvaluationSchema(candidateCount: number) {
               },
             },
             factualConfidence: { type: 'string', enum: ['High', 'Medium', 'Low'] },
+            verification: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['mode', 'evidenceStatus', 'independentSearchRequired', 'searchReason'],
+              properties: {
+                mode: { type: 'string', enum: ['generator_research', 'independent_web_search'] },
+                evidenceStatus: { type: 'string', enum: ['complete', 'incomplete', 'conflicting'] },
+                independentSearchRequired: { type: 'boolean' },
+                searchReason: { type: 'string' },
+              },
+            },
             decisionRationale: { type: 'string' },
             rewrite: {
               type: 'object',
@@ -384,6 +464,7 @@ function createEvaluationSchema(candidateCount: number) {
 async function evaluateQuestionsInBackground(
   openai: OpenAI,
   questions: GeneratedQuestion[],
+  generatorResearch: QuestionResearch[],
   parentRunId: string,
 ): Promise<{ evaluations: CandidateEvaluation[]; audit: ResponseAudit } | { error: string }> {
   const runId = `${parentRunId}-EVAL`;
@@ -391,39 +472,96 @@ async function evaluateQuestionsInBackground(
   const maxWebSearchCalls = Math.min(2, Math.max(1, questions.length));
   console.log(
     `[${runId}] Background evaluation started for ${questions.length} questions with ${evaluatorModel} ` +
-    `(web search required, max calls=${maxWebSearchCalls}).`,
+    `(generator research supplied, conditional web search, max calls=${maxWebSearchCalls}).`,
   );
   try {
-    const evaluationRequest = withToolCallLimit({
-      model: evaluatorModel,
-      instructions: getEvaluatorInstructions(),
-      input: buildEvaluatorInput(
-        JSON.stringify(questions),
-        'Evaluate every candidate independently and return the structured decisions now.',
-      ),
-      ...promptCacheConfig(evaluatorModel, evaluatorPromptCacheKey),
-      tools: [{ type: 'web_search' }],
-      tool_choice: 'required',
-      reasoning: { effort: 'medium' },
-      text: {
-        format: {
-          type: 'json_schema',
-          name: 'background_candidate_evaluations',
-          strict: true,
-          schema: createEvaluationSchema(questions.length),
+    const runEvaluation = async (
+      targetQuestions: GeneratedQuestion[],
+      targetResearch: QuestionResearch[],
+      toolChoice: 'auto' | 'required',
+      suffix: string,
+    ) => {
+      const evaluationRunId = suffix ? `${runId}-${suffix}` : runId;
+      const evaluationRequest = withToolCallLimit({
+        model: evaluatorModel,
+        instructions: getEvaluatorInstructions(),
+        input: buildEvaluatorInput(
+          JSON.stringify({ questions: targetQuestions, generatorResearch: targetResearch }),
+          toolChoice === 'required'
+            ? 'Independently verify the unresolved candidates with web search, then return the structured decisions.'
+            : 'Evaluate every candidate independently. Reuse complete low-risk generator research and search only when the verification rules require it.',
+        ),
+        ...promptCacheConfig(evaluatorModel, evaluatorPromptCacheKey),
+        tools: [{ type: 'web_search' }],
+        tool_choice: toolChoice,
+        reasoning: { effort: 'medium' },
+        text: {
+          format: {
+            type: 'json_schema',
+            name: suffix ? 'fallback_candidate_evaluations' : 'background_candidate_evaluations',
+            strict: true,
+            schema: createEvaluationSchema(targetQuestions.length),
+          },
         },
-      },
-      max_output_tokens: 18000,
-      store: false,
-    }, maxWebSearchCalls);
-    const initialInputPromise = countInitialInputTokens(openai, evaluationRequest, runId);
-    const evaluationResponse = await openai.responses.create(evaluationRequest);
-    const initialInputTokens = await initialInputPromise;
-    const evaluationResult = JSON.parse(evaluationResponse.output_text) as EvaluationResult;
+        max_output_tokens: 18000,
+        store: false,
+      }, Math.min(maxWebSearchCalls, Math.max(1, targetQuestions.length)));
+      const initialInputPromise = countInitialInputTokens(openai, evaluationRequest, evaluationRunId);
+      const response = await openai.responses.create(evaluationRequest);
+      const initialInputTokens = await initialInputPromise;
+      return {
+        response,
+        result: JSON.parse(response.output_text) as EvaluationResult,
+        audit: responseAudit(response, Date.now() - startedAt, evaluatorPromptCacheKey, initialInputTokens),
+      };
+    };
+
+    const initial = await runEvaluation(questions, generatorResearch, 'auto', '');
+    let evaluationResult = initial.result;
+    let evaluationAudit = initial.audit;
+    const initialUsedWebSearch = responseUsedWebSearch(initial.response);
     console.log(
-      `[${runId}] Background evaluation completed in ${Math.round((Date.now() - startedAt) / 1000)}s ` +
-      `(${responseStats(evaluationResponse, initialInputTokens)}).`,
+      `[${runId}] Conditional evaluation pass completed in ${Math.round((Date.now() - startedAt) / 1000)}s ` +
+      `(${responseStats(initial.response, initial.audit.initialInputTokens)}).`,
     );
+
+    const researchByCandidate = new Map(generatorResearch.map((research) => [research.candidateId, research]));
+    const evaluationByCandidate = new Map(evaluationResult.evaluations.map((evaluation) => [evaluation.candidateId, evaluation]));
+    const fallbackQuestions = questions.filter((question) => {
+      const evaluation = evaluationByCandidate.get(question.id);
+      if (!evaluation || !passesShippingBar(evaluation, question)) return false;
+      const verificationRequiresSearch =
+        researchRequiresIndependentSearch(researchByCandidate.get(question.id)) ||
+        evaluation.verification.independentSearchRequired ||
+        evaluation.verification.evidenceStatus !== 'complete' ||
+        evaluation.verification.mode === 'independent_web_search';
+      const independentlyVerified = initialUsedWebSearch && evaluation.verification.mode === 'independent_web_search';
+      return verificationRequiresSearch && !independentlyVerified;
+    });
+
+    if (fallbackQuestions.length > 0) {
+      const fallbackIds = new Set(fallbackQuestions.map((question) => question.id));
+      const fallbackResearch = generatorResearch.filter((research) => fallbackIds.has(research.candidateId));
+      console.log(
+        `[${runId}] Forcing independent verification for ${fallbackQuestions.length} shipping candidate(s): ` +
+        fallbackQuestions.map((question) => question.id).join(', '),
+      );
+      const fallback = await runEvaluation(fallbackQuestions, fallbackResearch, 'required', 'VERIFY');
+      const replacementByCandidate = new Map(
+        fallback.result.evaluations.map((evaluation) => [evaluation.candidateId, evaluation]),
+      );
+      evaluationResult = {
+        evaluations: evaluationResult.evaluations.map(
+          (evaluation) => replacementByCandidate.get(evaluation.candidateId) ?? evaluation,
+        ),
+      };
+      evaluationAudit = mergeResponseAudits(initial.audit, fallback.audit, Date.now() - startedAt);
+      console.log(
+        `[${runId}] Forced verification completed ` +
+        `(${responseStats(fallback.response, fallback.audit.initialInputTokens)}).`,
+      );
+    }
+
     for (const evaluation of evaluationResult.evaluations) {
       const question = questions.find((candidate) => candidate.id === evaluation.candidateId);
       const ships = question ? passesShippingBar(evaluation, question) : false;
@@ -433,7 +571,8 @@ async function evaluateQuestionsInBackground(
       const rewrite = evaluation.rewrite.applied ? ` | rewrite=${evaluation.rewrite.score.toFixed(1)}` : '';
       console.log(
         `[${runId}] ${evaluation.candidateId} | ${evaluation.decision} | overall=${evaluation.overall.toFixed(1)} | ` +
-        `confidence=${evaluation.factualConfidence} | ships=${ships ? 'YES' : 'NO'}${rewrite}`,
+        `confidence=${evaluation.factualConfidence} | verification=${evaluation.verification.mode} | ` +
+        `ships=${ships ? 'YES' : 'NO'}${rewrite}`,
       );
       if (copyIssues.length > 0) {
         console.warn(`[${runId}] ${evaluation.candidateId} failed deterministic player-copy validation.`, {
@@ -443,7 +582,7 @@ async function evaluateQuestionsInBackground(
     }
     return {
       evaluations: evaluationResult.evaluations,
-      audit: responseAudit(evaluationResponse, Date.now() - startedAt, evaluatorPromptCacheKey, initialInputTokens),
+      audit: evaluationAudit,
     };
   } catch (error) {
     const details = apiErrorDetails(error);
@@ -459,6 +598,7 @@ async function evaluateQuestionsInBackground(
 async function runBackgroundWorkflow(
   openai: OpenAI,
   quiz: GeneratedQuiz,
+  generatorResearch: QuestionResearch[],
   topic: string,
   externalRunId: string,
   runId: string,
@@ -472,8 +612,9 @@ async function runBackgroundWorkflow(
     evaluatorModel,
     quiz,
     generation: generationAudit,
+    generatorResearch,
   });
-  const evaluationOutcome = await evaluateQuestionsInBackground(openai, quiz.questions, externalRunId);
+  const evaluationOutcome = await evaluateQuestionsInBackground(openai, quiz.questions, generatorResearch, externalRunId);
   const generationSaved = await savePromise;
   if ('error' in evaluationOutcome) {
     if (generationSaved) await markEvaluationFailed(runId, externalRunId, evaluationOutcome.error);
@@ -652,7 +793,18 @@ app.post('/api/generate', async (request, response) => {
       teaser: string;
       openEndedQuestion: OpenEndedQuestion;
       progressiveCluesQuestion: ProgressiveCluesQuestion;
+      openEndedResearch: QuestionResearch;
+      progressiveCluesResearch: QuestionResearch;
     };
+    const generatorResearch = [generatedQuiz.openEndedResearch, generatedQuiz.progressiveCluesResearch];
+    const blueprintIssues = validateBlueprintPair(
+      generatedQuiz.openEndedResearch.blueprint,
+      generatedQuiz.progressiveCluesResearch.blueprint,
+    );
+    if (blueprintIssues.length > 0) {
+      console.warn(`[${runId}] Generated quiz failed blueprint diversity validation.`, { issues: blueprintIssues });
+      return response.status(502).json({ error: 'The generated quiz did not pass our diversity checks. Please try again.' });
+    }
     const databaseRunId = randomUUID();
     const quiz: GeneratedQuiz = {
       title: generatedQuiz.title,
@@ -681,7 +833,9 @@ app.post('/api/generate', async (request, response) => {
     }
     console.log(`[${runId}] Sending questions to the webpage now; evaluation will continue in the background.`);
     response.json(quiz);
-    continueAfterResponse(runBackgroundWorkflow(openai, quiz, topic, runId, databaseRunId, generationAudit));
+    continueAfterResponse(
+      runBackgroundWorkflow(openai, quiz, generatorResearch, topic, runId, databaseRunId, generationAudit),
+    );
   } catch (error) {
     const details = apiErrorDetails(error);
     console.error(`[${runId}] Quiz generation failed after ${Math.round((Date.now() - startedAt) / 1000)}s:`, details.status || '', details.message);
@@ -695,8 +849,8 @@ app.post('/api/pipeline-test', async (request, response) => {
     return response.status(404).json({ error: 'Not found.' });
   }
   const topicValidation = validateTopic(request.body?.topic);
-  const requestedCount = Number(request.body?.candidateCount || 8);
-  const candidateCount = Number.isInteger(requestedCount) && requestedCount >= 4 && requestedCount <= 10 ? requestedCount : 8;
+  const requestedCount = Number(request.query.candidateCount ?? request.body?.candidateCount ?? 8);
+  const candidateCount = Number.isInteger(requestedCount) && requestedCount >= 3 && requestedCount <= 10 ? requestedCount : 8;
   if (!topicValidation.valid) return response.status(400).json({ error: topicValidation.error });
   const { topic } = topicValidation;
   if (!process.env.OPENAI_API_KEY) return response.status(503).json({ error: 'OpenAI is not configured.' });
@@ -748,25 +902,29 @@ app.post('/api/pipeline-test', async (request, response) => {
       const generationStartedAt = Date.now();
       logStage(`GEN START ${candidateId} | direction=${assignment.direction}`);
 
-      const generationResponse = await openai.responses.create(withToolCallLimit({
-        model: generatorModel,
-        instructions: getGeneratorInstructions(),
-        input: buildGeneratorInput(
-          topic,
-          1,
-          `Generate exactly one candidate for slot ${candidateNumber}. Use this assigned direction: ${assignment.direction}. ` +
-            'Keep it open-ended, inferable, source-verifiable, and avoid common quiz chestnuts.',
-        ),
-        ...promptCacheConfig(generatorModel, generatorPromptCacheKey),
-        tools: [{ type: 'web_search' }],
-        reasoning: { effort: 'medium' },
-        text: { format: { type: 'json_schema', name: 'candidate_generation', strict: true, schema: createQuizSchema(1) } },
-        max_output_tokens: 6000,
-        store: false,
-      }, 1));
-      const generated = JSON.parse(generationResponse.output_text) as { questions: OpenEndedQuestion[] };
-      const rawCandidate = generated.questions[0];
-      if (!rawCandidate) throw new Error(`Generator returned no question for ${candidateId}.`);
+      const { generationResponse, rawCandidate } = await withSingleRetry(`GEN ${candidateId}`, async () => {
+        const response = await openai.responses.create(withToolCallLimit({
+          model: generatorModel,
+          instructions: getGeneratorInstructions(),
+          input: buildGeneratorInput(
+            topic,
+            1,
+            `Generate exactly one candidate for slot ${candidateNumber}. Explore this direction first: ${assignment.direction}. ` +
+              'Treat it as a search lens, not a requirement: abandon it if no premise in that direction clears the silent selection gate. ' +
+              'Return only a premise that is open-ended, inferable, source-verifiable, and likely to clear the evaluator shipping bar.',
+          ),
+          ...promptCacheConfig(generatorModel, generatorPromptCacheKey),
+          tools: [{ type: 'web_search' }],
+          reasoning: { effort: 'medium' },
+          text: { format: { type: 'json_schema', name: 'candidate_generation', strict: true, schema: createQuizSchema(1) } },
+          max_output_tokens: 6000,
+          store: false,
+        }, 1));
+        const generated = JSON.parse(response.output_text) as { questions: OpenEndedQuestion[] };
+        const generatedCandidate = generated.questions[0];
+        if (!generatedCandidate) throw new Error(`Generator returned no question for ${candidateId}.`);
+        return { generationResponse: response, rawCandidate: generatedCandidate };
+      });
       const candidate: OpenEndedQuestion = {
         ...rawCandidate,
         id: candidateId,
@@ -783,31 +941,34 @@ app.post('/api/pipeline-test', async (request, response) => {
 
       const evaluationStartedAt = Date.now();
       logStage(`EVAL START ${candidateId} | model=${evaluatorModel} | web search required, max calls=1`);
-      const evaluationResponse = await openai.responses.create(withToolCallLimit({
-        model: evaluatorModel,
-        instructions: getEvaluatorInstructions(),
-        input: buildEvaluatorInput(
-          JSON.stringify([candidate]),
-          'Evaluate this candidate independently and return one structured decision now.',
-        ),
-        ...promptCacheConfig(evaluatorModel, evaluatorPromptCacheKey),
-        tools: [{ type: 'web_search' }],
-        tool_choice: 'required',
-        reasoning: { effort: 'medium' },
-        text: {
-          format: {
-            type: 'json_schema',
-            name: 'candidate_evaluation',
-            strict: true,
-            schema: createEvaluationSchema(1),
+      const { evaluationResponse, rawEvaluation } = await withSingleRetry(`EVAL ${candidateId}`, async () => {
+        const response = await openai.responses.create(withToolCallLimit({
+          model: evaluatorModel,
+          instructions: getEvaluatorInstructions(),
+          input: buildEvaluatorInput(
+            JSON.stringify([candidate]),
+            'Evaluate this candidate independently and return one structured decision now.',
+          ),
+          ...promptCacheConfig(evaluatorModel, evaluatorPromptCacheKey),
+          tools: [{ type: 'web_search' }],
+          tool_choice: 'required',
+          reasoning: { effort: 'medium' },
+          text: {
+            format: {
+              type: 'json_schema',
+              name: 'candidate_evaluation',
+              strict: true,
+              schema: createEvaluationSchema(1),
+            },
           },
-        },
-        max_output_tokens: 6000,
-        store: false,
-      }, 1));
-      const parsedEvaluation = JSON.parse(evaluationResponse.output_text) as EvaluationResult;
-      const rawEvaluation = parsedEvaluation.evaluations[0];
-      if (!rawEvaluation) throw new Error(`Evaluator returned no decision for ${candidateId}.`);
+          max_output_tokens: 6000,
+          store: false,
+        }, 1));
+        const parsedEvaluation = JSON.parse(response.output_text) as EvaluationResult;
+        const generatedEvaluation = parsedEvaluation.evaluations[0];
+        if (!generatedEvaluation) throw new Error(`Evaluator returned no decision for ${candidateId}.`);
+        return { evaluationResponse: response, rawEvaluation: generatedEvaluation };
+      });
       const evaluation: CandidateEvaluation = { ...rawEvaluation, candidateId };
       const ships = passesShippingBar(evaluation, candidate);
       const rewrite = evaluation.rewrite.applied ? ` | rewrite=${evaluation.rewrite.score.toFixed(1)}` : '';

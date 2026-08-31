@@ -9,6 +9,7 @@ import type {
 } from '../src/types';
 import { PROGRESSIVE_CLUES_CONTEXT } from '../src/constants.js';
 import { getCanonicalPromptDefinitions } from './prompts.js';
+import type { QuestionResearch } from './question-schemas.js';
 
 export interface ResponseAudit {
   responseId: string | null;
@@ -36,6 +37,7 @@ export interface GeneratedQuizPersistenceInput {
   evaluatorModel: string;
   quiz: GeneratedQuiz;
   generation: ResponseAudit;
+  generatorResearch: QuestionResearch[];
 }
 
 export interface PersistedEvaluation {
@@ -187,11 +189,13 @@ export async function persistGeneratedQuiz(input: GeneratedQuizPersistenceInput)
           generationWebSearchCalls: input.generation.webSearchCalls,
           generationDurationMs: input.generation.durationMs,
         },
-        p_questions: input.quiz.questions.map((question) =>
-          question.format === 'progressive_clues'
+        p_questions: input.quiz.questions.map((question) => {
+          const research = input.generatorResearch.find((record) => record.candidateId === question.id);
+          const persistedQuestion = question.format === 'progressive_clues'
             ? { ...question, context: PROGRESSIVE_CLUES_CONTEXT }
-            : question,
-        ),
+            : question;
+          return { ...persistedQuestion, research };
+        }),
       });
       if (result.error) throw result.error;
       const cacheMetrics = await getAdminClient()

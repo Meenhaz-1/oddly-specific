@@ -1,52 +1,39 @@
 # Editorial calibration examples
 
-These examples calibrate product taste and question construction. They are not source evidence, and their subjects, wording, and answers must not be copied. Independently research and verify every generated candidate.
+These abstract constructions calibrate variety, not subject matter. They are not source evidence. Do not copy their wording, facts, rhythms, or answer types; independently research every candidate.
 
-## Pattern 1: apparent contradiction with an economic explanation
+## Cross-domain connect
 
-**Context:** A barrier in colonial India looked like an overgrown rural hedge, yet versions of it ran for thousands of kilometres and were heavily patrolled. It was neither a military frontier nor an animal barrier.
+Give two independently useful observations from different fields, then ask for the entity or relationship that explains both. Neither observation should merely restate the other, and the shared link should add meaning rather than depend on a pun or direct etymology.
 
-**Prompt:** What were officials trying to stop people from carrying across it, and why was the barrier worth maintaining?
+## Entity plus reason
 
-**Short answer:** Salt
+Present a constrained historical or scientific situation and ask for both the entity and why it behaved that way. The entity alone should be insufficient for full credit; the causal explanation belongs partly in the requested answer, not leaked in the setup.
 
-**Why this is strong:** The visible object encourages plausible but incorrect frames such as defence or animal control. The scale becomes intelligible only after the reveal connects it to tax enforcement and government revenue.
+## Quotation identification
 
-## Pattern 2: familiar object with a hidden system requirement
+Use a short, verified quotation whose imagery, context, and consequence provide separate anchors. Ask for the speaker or work only when those anchors meaningfully narrow the field. Fame of the quotation alone is bare recall and is not enough.
 
-**Context:** Cargo once travelled in sacks, crates, barrels, and boxes of incompatible sizes. A deceptively simple design decision later allowed the same load to move among ships, trains, trucks, cranes, and ports worldwide.
+## Visual inference
 
-**Prompt:** What object had to be standardized to make that system interoperable?
+Use a sourced image as evidence: a material detail, spatial relationship, alteration, or omission should support an inference. The same question should become materially weaker without the image. A portrait used only to ask who is shown is not visual inference.
 
-**Short answer:** Shipping containers
+## Transformation or sequence
 
-**Why this is strong:** The question stops before explaining the central mechanism. The reveal can then explain standardized dimensions and corner fittings instead of giving interoperability away in the stem.
+Supply stages from different points in a process and ask the player to identify, complete, or order the transformation. Reserve the causal resolution for the reveal. Do not turn a familiar origin story into a chronology exercise by merely adding dates.
 
-## Pattern 3: unnoticed detail designed around a failure mode
+## Constrained identification
 
-**Context:** An everyday object has a small circular hole near one end. It is not decorative and is not primarily for hanging the object. The design anticipates a dangerous accident involving a child.
+Combine an artifact, consequence, statistic, or comparison with a second independent constraint. Ask for one precisely scoped entity. Each clue should remove a different class of alternatives instead of paraphrasing a definition.
 
-**Prompt:** What object is it?
+## Controlled completion
 
-**Short answer:** Pen cap
-
-**Why this is strong:** The physical detail is familiar once revealed, while the failure-mode clue gives a route to the answer. A plausible wrong guess is not automatically fatal when the full wording still points most strongly to the intended object.
-
-## Pattern 4: transformation preserved in a name
-
-**Context:** A South Asian dish of rice and lentils travelled to Britain and became a substantially different breakfast dish containing ingredients such as smoked fish and eggs, while retaining a transformed version of its original name.
-
-**Prompt:** What British dish resulted?
-
-**Short answer:** Kedgeree
-
-**Why this is strong:** It combines culinary history, linguistic transformation, and a satisfying reveal. Some recall is acceptable because the underlying journey is interesting and the clues narrow the answer meaningfully.
+Provide enough of a verified phrase, list, pattern, or procedure for completion through context and structure. Omit the portion that requires the interesting connection. Do not use a famous line whose completion is simply memorized.
 
 ## Construction lessons
 
-- Prefer paradoxes, hidden incentives, surprising constraints, unnoticed design details, and transformations that make sense after the reveal.
+- Vary what the player does, what evidence they receive, the relationship they must discover, and what form the answer takes.
 - Productive misdirection gives the player a plausible initial model that later evidence overturns.
-- A decisive clue is allowed when it enables deduction; it is not allowed when it literally states, translates, or defines the answer.
-- Keep the short answer suitable for the circled reveal. Put the deeper mechanism in the explanation.
-- Stop the stem before explaining the most interesting mechanism.
-- Do not imitate the examples' topics, surface wording, sentence rhythm, or answer types.
+- A decisive clue is allowed when it enables deduction or anchored recognition; it is not allowed when it states, translates, or defines the answer.
+- Keep the short answer suitable for the reveal. Put the deeper mechanism in the explanation unless the answer contract explicitly requests a reason.
+- Stop the stem before explaining the most interesting relationship.

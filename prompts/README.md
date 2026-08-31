@@ -4,9 +4,11 @@ This directory is the canonical source of truth for all model prompts.
 
 - `generator.md` — candidate research and generation prompt supplied by the product team.
 - `generator-examples.md` — curated positive construction examples and editorial taste calibration.
+- `generator-guardrails.md` — database-derived premise-selection and question-construction guardrails.
 - `evaluator.md` — independent critic, scoring, rewrite, and rejection prompt.
 - `evaluator-examples.md` — calibrated ACCEPT, REWRITE, and REJECT examples.
-- `open-ended-task.md` — temporary MVP specialization while generated questions are open-ended only.
+- `open-ended-task.md` — format specialization for the open-ended question in each generated set.
+- `progressive-clues-task.md` — format specialization for the progressive three-clue question.
 
 Runtime code must load prompt text from this directory. Do not duplicate prompt prose in `server.ts` or client code.
 

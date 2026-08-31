@@ -1,5 +1,5 @@
 begin;
-select plan(49);
+select plan(73);
 
 select has_table('public', 'prompt_versions', 'prompt_versions exists');
 select has_table('public', 'quiz_runs', 'quiz_runs exists');
@@ -7,9 +7,18 @@ select has_table('public', 'questions', 'questions exists');
 select has_table('public', 'question_sources', 'question_sources exists');
 select has_table('public', 'question_evaluations', 'question_evaluations exists');
 select has_table('public', 'question_feedback', 'question_feedback exists');
+select has_table('public', 'reference_decks', 'reference_decks exists');
+select has_table('public', 'reference_question_candidates', 'reference candidates exist');
+select has_column('public', 'questions', 'origin', 'questions record their origin');
+select has_column('public', 'questions', 'reference_candidate_id', 'questions can reference curated candidates');
+select has_column('public', 'questions', 'topic', 'questions have a category topic');
+select has_column('public', 'questions', 'blueprint', 'questions store their blueprint');
+select has_column('public', 'questions', 'research_record', 'questions store internal research separately from public JSON');
+select has_column('public', 'reference_question_candidates', 'verification_mode', 'curated candidates declare their verification mode');
 select has_function('public', 'save_generated_quiz', array['jsonb', 'jsonb'], 'generation RPC exists');
 select has_function('public', 'save_quiz_evaluations', array['uuid', 'jsonb', 'jsonb'], 'evaluation RPC exists');
 select has_function('public', 'get_random_archive_questions', array['integer', 'uuid[]'], 'random archive RPC exists');
+select has_function('public', 'publish_curated_question', array['uuid'], 'curated publication RPC exists');
 select has_column('public', 'quiz_runs', 'generation_cached_input_tokens', 'generation cached tokens are stored');
 select has_column('public', 'quiz_runs', 'generation_cache_hit_rate', 'generation cache hit rate is stored');
 select has_column('public', 'quiz_runs', 'generation_prompt_cache_key', 'generation cache key is stored');
@@ -77,6 +86,16 @@ select results_eq(
   $$select count(*)::integer from public.question_evaluations where question_id = '44444444-4444-4444-8444-444444444444'$$,
   array[1],
   'one evaluation is stored'
+);
+select results_eq(
+  $$select distinct origin from public.questions where quiz_run_id = '33333333-3333-4333-8333-333333333333'$$,
+  array['generated'::text],
+  'existing generated writes default to generated origin'
+);
+select results_eq(
+  $$select distinct topic from public.questions where quiz_run_id = '33333333-3333-4333-8333-333333333333'$$,
+  array['Test'::text],
+  'generated question topic is inherited from its run'
 );
 
 insert into public.questions (
@@ -200,6 +219,131 @@ select ok(
 select ok(
   not has_function_privilege('authenticated', 'public.get_random_archive_questions(integer,uuid[])', 'execute'),
   'authenticated users cannot execute the random archive RPC'
+);
+
+select lives_ok($$
+  with deck as (
+    insert into public.reference_decks (id, title, canonical_url, uploader_author, source_year)
+    values ('99999999-9999-4999-8999-999999999991', 'Reference deck', 'https://example.com/deck', 'Test author', 2024)
+    returning id
+  )
+  insert into public.reference_question_candidates (
+    id, deck_id, slide_locator, premise_summary, topic, player_action, evidence_form,
+    relationship, answer_contract, compatibility, status, adapted_question, verification_record
+  ) select
+    '99999999-9999-4999-8999-999999999992', deck.id, 'question-1',
+    'A paraphrased premise summary.', 'Books, music & art', 'connect', 'paired_observations',
+    'shared_link', 'single_entity', 'current_open_ended', 'evaluated', '{}'::jsonb, '{}'::jsonb
+  from deck
+$$, 'reference deck and screened candidate can be staged');
+
+select lives_ok($$
+  insert into public.questions (
+    id, quiz_run_id, origin, reference_candidate_id, topic, candidate_id, position, label,
+    format, context, prompt, answer_short, answer_explanation, raw_question
+  ) values (
+    '99999999-9999-4999-8999-999999999993', null, 'curated', '99999999-9999-4999-8999-999999999992',
+    'Books, music & art', 'curated-q1', 1, 'CONNECT', 'open_ended',
+    'A sufficiently long independently written curated context.', 'What connects the evidence?',
+    'Test connection', 'The independently verified explanation completes the connection.', '{}'::jsonb
+  )
+$$, 'curated questions can exist without a quiz run');
+
+select lives_ok($$
+  with source_insert as (
+    insert into public.question_sources (question_id, source_key, title, publisher, url)
+    values ('99999999-9999-4999-8999-999999999993', 's01a', 'Independent source', 'Authority', 'https://example.com/fact')
+    returning question_id
+  )
+  insert into public.question_evaluations (
+    question_id, decision, solvability, reveal_quality, clue_discipline, originality,
+    answer_precision, wording_efficiency, overall, factual_confidence, decision_rationale,
+    clue_leakage_issues, alternative_answers, rewrite_applied, rewrite_score, ships, raw_evaluation
+  ) select
+    source_insert.question_id, 'ACCEPT', 5, 5, 5, 5, 5, 5, 5.0,
+    'High', 'Curated question passes.', '{}', '[]'::jsonb, false, 0, true, '{}'::jsonb
+  from source_insert
+$$, 'curated questions reuse source and evaluation tables');
+
+select results_eq(
+  $$select topic from public.get_random_archive_questions(10, '{}'::uuid[]) where question_id = '99999999-9999-4999-8999-999999999993'::uuid$$,
+  array['Books, music & art'::text],
+  'shipping curated questions enter the archive with their category'
+);
+
+select throws_ok($$
+  insert into public.questions (
+    id, quiz_run_id, origin, reference_candidate_id, topic, candidate_id, position, label,
+    format, context, prompt, answer_short, answer_explanation, raw_question
+  ) values (
+    '99999999-9999-4999-8999-999999999994', '33333333-3333-4333-8333-333333333333', 'curated',
+    null, 'Cinema', 'invalid-1', 9, 'TEST', 'open_ended', 'Invalid context.', 'Invalid?', 'Invalid', 'Invalid explanation.', '{}'::jsonb
+  )
+$$, '23514', null, 'curated questions cannot have generated parents');
+
+select throws_ok($$
+  insert into public.questions (
+    id, quiz_run_id, origin, reference_candidate_id, topic, candidate_id, position, label,
+    format, context, prompt, answer_short, answer_explanation, raw_question
+  ) values (
+    '99999999-9999-4999-8999-999999999995', null, 'generated',
+    '99999999-9999-4999-8999-999999999992', 'Cinema', 'invalid-2', 9, 'TEST', 'open_ended',
+    'Invalid context.', 'Invalid?', 'Invalid', 'Invalid explanation.', '{}'::jsonb
+  )
+$$, '23514', null, 'generated questions require a quiz run and no reference candidate');
+
+select lives_ok($$
+  insert into public.reference_question_candidates (
+    id, deck_id, slide_locator, premise_summary, topic, player_action, evidence_form,
+    relationship, answer_contract, compatibility, status
+  ) values (
+    '99999999-9999-4999-8999-999999999996', '99999999-9999-4999-8999-999999999991', 'question-2',
+    'A visual premise for a later format.', 'Places & cultures', 'identify', 'visual',
+    'contrast', 'single_entity', 'future_visual', 'future_format'
+  )
+$$, 'future-format candidates remain staged');
+
+select results_eq(
+  $$select count(*)::integer from public.get_random_archive_questions(10, '{}'::uuid[]) where question_id = '99999999-9999-4999-8999-999999999996'::uuid$$,
+  array[0],
+  'future-format candidates never enter the archive'
+);
+
+select lives_ok($$
+  insert into public.question_feedback (question_id, anonymous_session_id, rating)
+  values ('99999999-9999-4999-8999-999999999993', '99999999-9999-4999-8999-999999999997', 'good')
+$$, 'feedback works for curated questions');
+
+select lives_ok($$
+  insert into public.reference_question_candidates (
+    id, deck_id, slide_locator, premise_summary, topic, player_action, evidence_form,
+    relationship, answer_contract, compatibility, status, verification_mode,
+    adapted_question, verification_record, evaluator_metadata
+  ) values (
+    '99999999-9999-4999-8999-999999999998', '99999999-9999-4999-8999-999999999991', 'question-3',
+    'A user-verified source-free premise.', 'People & society', 'identify', 'narrative',
+    'consequence', 'single_entity', 'current_open_ended', 'evaluated', 'user_verified',
+    '{"id":"curated-source-free","position":1,"label":"IDENTIFY","format":"open_ended","context":"A sufficiently long user-verified context written independently for this test.","prompt":"What is the intended answer?","answer":{"short":"Source-free answer","explanation":"The explanation completes the independently written and user-verified premise."}}'::jsonb,
+    '{"sources":[],"notes":"Verified by corpus owner."}'::jsonb,
+    '{"decision":"ACCEPT","solvability":5,"revealQuality":5,"clueDiscipline":5,"originality":5,"answerPrecision":5,"wordingEfficiency":5,"overall":5,"factualConfidence":"High","decisionRationale":"Passes editorial review.","clueLeakageIssues":[],"alternativeAnswers":[],"ships":true}'::jsonb
+  )
+$$, 'user-verified candidates can intentionally omit sources');
+
+select lives_ok(
+  $$select public.publish_curated_question('99999999-9999-4999-8999-999999999998')$$,
+  'a user-verified candidate publishes without source rows'
+);
+
+select results_eq(
+  $$select count(*)::integer from public.question_sources where question_id = (select promoted_question_id from public.reference_question_candidates where id = '99999999-9999-4999-8999-999999999998')$$,
+  array[0],
+  'source-free curated publication creates no placeholder sources'
+);
+
+select results_eq(
+  $$select sources from public.get_random_archive_questions(10, '{}'::uuid[]) where question_id = (select promoted_question_id from public.reference_question_candidates where id = '99999999-9999-4999-8999-999999999998')$$,
+  array['[]'::jsonb],
+  'source-free curated questions remain archive eligible with an empty sources array'
 );
 
 select lives_ok(

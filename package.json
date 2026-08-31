@@ -6,6 +6,12 @@
   "scripts": {
     "dev": "tsx server.ts",
     "generate": "tsx scripts/generate.ts",
+    "curation:dry-run": "tsx scripts/import-reference-corpus.ts",
+    "curation:screen": "tsx scripts/screen-reference-decks.ts --apply",
+    "curation:apply": "tsx scripts/import-reference-corpus.ts --apply",
+    "curation:evaluate": "tsx scripts/evaluate-reference-corpus.ts --apply",
+    "curation:publish": "tsx scripts/import-reference-corpus.ts --apply --publish",
+    "test:blueprints": "tsx scripts/test-question-blueprints.ts",
     "build": "vite build",
     "lint": "oxlint",
     "typecheck": "tsc --noEmit",
