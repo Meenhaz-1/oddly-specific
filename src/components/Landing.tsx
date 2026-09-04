@@ -1,13 +1,12 @@
 import './Landing.css';
 import { AnimatedNumber } from './motion-primitives/AnimatedNumber';
 import { InfiniteSlider } from './motion-primitives/InfiniteSlider';
-import { GENERATED_QUESTION_COUNT, MAX_TOPIC_CHARACTERS } from '../constants';
+import { MAX_TOPIC_CHARACTERS, TOPIC_QUESTION_COUNT } from '../constants';
 import { TOPICS } from '../data/questions';
-import type { KeyboardEvent } from 'react';
+import { lazy, Suspense, useEffect, useState, type KeyboardEvent } from 'react';
 import type { QuizActions, QuizState } from '../types';
 
-// Temporary local value until quiz-play analytics are read from the database.
-const QUIZZES_PLAYED = 271;
+const SheetImporter = import.meta.env.DEV ? lazy(() => import('./SheetImporter')) : null;
 
 interface LandingProps {
   state: QuizState;
@@ -16,6 +15,20 @@ interface LandingProps {
 
 export default function Landing({ state, actions }: LandingProps) {
   const { other } = state;
+  const [playCount, setPlayCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch('/api/play-count', { signal: controller.signal })
+      .then(async (response) => response.ok ? response.json() as Promise<{ count: number }> : null)
+      .then((result) => {
+        if (result && Number.isSafeInteger(result.count) && result.count >= 0) setPlayCount(result.count);
+      })
+      .catch((error: unknown) => {
+        if (!(error instanceof Error) || error.name !== 'AbortError') console.warn('Could not load play count.', error);
+      });
+    return () => controller.abort();
+  }, []);
 
   const onOtherKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter') actions.startQuiz();
@@ -54,7 +67,7 @@ export default function Landing({ state, actions }: LandingProps) {
               <span className="topic-ticket__tab" style={{ background: topic.tab }} aria-hidden="true" />
               <span className="topic-ticket__name">{topic.name}</span>
               <span className="topic-ticket__meta">
-                <span>{GENERATED_QUESTION_COUNT} questions</span>
+                <span>{TOPIC_QUESTION_COUNT} questions</span>
                 <span className="topic-ticket__arrow" aria-hidden="true">&rarr;</span>
               </span>
             </button>
@@ -97,14 +110,15 @@ export default function Landing({ state, actions }: LandingProps) {
         </div>
       </div>
 
-      <p className="landing__play-count" aria-label={`${QUIZZES_PLAYED} quizzes played so far`}>
-        <AnimatedNumber
+      <p className="landing__play-count" aria-live="polite" aria-label={playCount === null ? 'Loading quiz play count' : `${playCount} quizzes played so far`}>
+        {playCount === null ? <span className="landing__play-count-number">...</span> : <AnimatedNumber
           className="landing__play-count-number"
           springOptions={{ bounce: 0, duration: 1800 }}
-          value={QUIZZES_PLAYED}
-        />
+          value={playCount}
+        />}
         <span>quizzes played so far</span>
       </p>
+      {SheetImporter && <Suspense fallback={null}><SheetImporter /></Suspense>}
     </div>
   );
 }

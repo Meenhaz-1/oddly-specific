@@ -313,6 +313,24 @@ interface SharedQuizSourceRow {
   url: string;
 }
 
+interface QuizCompositionRow {
+  question_id: string;
+  position: number;
+}
+
+export async function persistQuizComposition(runId: string, questions: GeneratedQuestion[]): Promise<void> {
+  if (!isSupabaseConfigured()) return;
+  const result = await getAdminClient().from('quiz_run_question_sets').upsert(
+    questions.map((question, index) => ({
+      quiz_run_id: runId,
+      question_id: question.questionId,
+      position: index + 1,
+    })),
+    { onConflict: 'quiz_run_id,question_id' },
+  );
+  if (result.error) throw result.error;
+}
+
 export async function fetchSharedQuiz(runId: string): Promise<SharedQuizResponse | null> {
   if (!isSupabaseConfigured()) throw new Error('Supabase is not configured.');
   const client = getAdminClient();
@@ -325,14 +343,29 @@ export async function fetchSharedQuiz(runId: string): Promise<SharedQuizResponse
   if (!runResult.data) return null;
 
   const run = runResult.data as SharedQuizRunRow;
-  const questionResult = await client
-    .from('questions')
-    .select('id, candidate_id, position, label, format, context, prompt, answer_short, answer_explanation, raw_question')
+  const compositionResult = await client
+    .from('quiz_run_question_sets')
+    .select('question_id, position')
     .eq('quiz_run_id', runId)
     .order('position');
+  if (compositionResult.error) throw compositionResult.error;
+  const composition = (compositionResult.data || []) as QuizCompositionRow[];
+  const questionQuery = client
+    .from('questions')
+    .select('id, candidate_id, position, label, format, context, prompt, answer_short, answer_explanation, raw_question');
+  const questionResult = composition.length
+    ? await questionQuery.in('id', composition.map((item) => item.question_id))
+    : await questionQuery.eq('quiz_run_id', runId).order('position');
   if (questionResult.error) throw questionResult.error;
-  const questionRows = (questionResult.data || []) as SharedQuizQuestionRow[];
-  if (questionRows.length !== run.question_count) return null;
+  const unorderedRows = (questionResult.data || []) as SharedQuizQuestionRow[];
+  const questionRows = composition.length
+    ? composition.flatMap((item) => {
+        const row = unorderedRows.find((candidate) => candidate.id === item.question_id);
+        return row ? [{ ...row, position: item.position }] : [];
+      })
+    : unorderedRows;
+  const expectedCount = composition.length || run.question_count;
+  if (questionRows.length !== expectedCount) return null;
 
   const questionIds = questionRows.map((question) => question.id);
   const sourceResult = await client
@@ -388,6 +421,122 @@ interface RandomArchiveRow {
   topic: string;
   sources: Array<{ id: string; title: string; publisher: string; url: string }>;
   reset_exclusions: boolean;
+}
+
+export async function getQuizPlayCount(): Promise<number> {
+  if (!isSupabaseConfigured()) throw new Error('Supabase is not configured.');
+  const result = await getAdminClient()
+    .from('quiz_play_events')
+    .select('id', { count: 'exact', head: true });
+  if (result.error) throw result.error;
+  return result.count ?? 0;
+}
+
+export async function recordQuizPlay(input: {
+  id: string;
+  topic: string;
+  mode: 'generated' | 'random' | 'shared';
+  runId: string | null;
+}): Promise<number> {
+  if (!isSupabaseConfigured()) throw new Error('Supabase is not configured.');
+  const insertResult = await getAdminClient()
+    .from('quiz_play_events')
+    .upsert({
+      id: input.id,
+      topic: input.topic,
+      mode: input.mode,
+      run_id: input.runId,
+    }, { onConflict: 'id', ignoreDuplicates: true });
+  if (insertResult.error) throw insertResult.error;
+  return getQuizPlayCount();
+}
+
+export async function importCuratedSheet(input: {
+  url: string;
+  title: string;
+  questions: unknown[];
+}): Promise<number> {
+  if (!isSupabaseConfigured()) throw new Error('Supabase is not configured.');
+  const result = await getAdminClient().rpc('import_curated_sheet', {
+    p_sheet_url: input.url,
+    p_sheet_title: input.title,
+    p_questions: input.questions,
+  });
+  if (result.error) throw result.error;
+  return Number(result.data);
+}
+
+export async function fetchTopicArchiveQuestions(topic: string, count: number): Promise<OpenEndedQuestion[]> {
+  if (!isSupabaseConfigured()) throw new Error('Supabase is not configured.');
+  const result = await getAdminClient()
+    .from('questions')
+    .select(`
+      id, label, context, prompt, answer_short, answer_explanation, topic, origin,
+      question_sources(source_key, title, publisher, url),
+      question_evaluations!inner(ships, rewrite_applied, rewrite_context, rewrite_prompt, rewrite_answer_short, rewrite_answer_explanation),
+      quiz_runs!questions_quiz_run_id_fkey(status)
+    `)
+    .eq('format', 'open_ended')
+    .ilike('topic', topic)
+    .limit(100);
+  if (result.error) throw result.error;
+  const rows = (result.data || []) as unknown as Array<{
+    id: string;
+    label: string;
+    context: string;
+    prompt: string;
+    answer_short: string;
+    answer_explanation: string;
+    topic: string;
+    origin: 'generated' | 'curated';
+    question_sources: Array<{ source_key: string; title: string; publisher: string; url: string }>;
+    question_evaluations: {
+      ships: boolean;
+      rewrite_applied: boolean;
+      rewrite_context: string | null;
+      rewrite_prompt: string | null;
+      rewrite_answer_short: string | null;
+      rewrite_answer_explanation: string | null;
+    };
+    quiz_runs: { status: string } | null;
+  }>;
+  return rows
+    .filter((row) => {
+      return row.question_sources.length > 0
+        && (row.origin === 'curated' || row.quiz_runs?.status === 'evaluation_complete');
+    })
+    .sort((left, right) => {
+      if (left.question_evaluations.ships !== right.question_evaluations.ships) {
+        return left.question_evaluations.ships ? -1 : 1;
+      }
+      return Math.random() - 0.5;
+    })
+    .slice(0, count)
+    .map((row, index) => {
+      const evaluation = row.question_evaluations;
+      return {
+    questionId: row.id,
+    topic: row.topic,
+    id: row.id,
+    position: index + 1,
+    label: row.label,
+    format: 'open_ended',
+    context: evaluation.rewrite_applied ? evaluation.rewrite_context || row.context : row.context,
+    prompt: evaluation.rewrite_applied ? evaluation.rewrite_prompt || row.prompt : row.prompt,
+    answer: {
+      short: evaluation.rewrite_applied ? evaluation.rewrite_answer_short || row.answer_short : row.answer_short,
+      explanation: evaluation.rewrite_applied
+        ? evaluation.rewrite_answer_explanation || row.answer_explanation
+        : row.answer_explanation,
+    },
+    sources: row.question_sources.map((source) => ({
+      id: source.source_key,
+      title: source.title,
+      publisher: source.publisher,
+      url: source.url,
+    })),
+  };
+    });
 }
 
 export async function fetchRandomArchiveQuiz(

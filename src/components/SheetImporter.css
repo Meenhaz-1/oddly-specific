@@ -1,0 +1,77 @@
+.sheet-importer {
+  margin-top: 34px;
+  border-top: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.sheet-importer__toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.sheet-importer__toggle span:last-child {
+  color: var(--forest);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.sheet-importer__body {
+  padding: 2px 0 20px;
+  color: var(--body-text);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.sheet-importer details { margin: 14px 0 18px; }
+.sheet-importer summary { color: var(--forest); cursor: pointer; font-weight: 650; }
+.sheet-importer code { overflow-wrap: anywhere; }
+.sheet-importer a { color: var(--forest); font-weight: 650; }
+.sheet-importer form label { display: block; margin-bottom: 7px; font-weight: 650; color: var(--ink); }
+
+.sheet-importer__control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  border: 1px solid var(--line-strong);
+  background: var(--paper-raised);
+}
+
+.sheet-importer__control input {
+  min-width: 0;
+  padding: 14px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+}
+
+.sheet-importer__control button {
+  border: 0;
+  border-left: 1px solid var(--line-strong);
+  padding: 0 16px;
+  background: var(--forest);
+  color: var(--paper);
+  font: inherit;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sheet-importer__control button:active { transform: translateY(1px); }
+.sheet-importer__control button:disabled { cursor: wait; opacity: 0.62; }
+.sheet-importer__message { margin: 12px 0 0; color: var(--forest); font-weight: 650; }
+.sheet-importer__message--error { color: #8f3328; }
+
+@media (max-width: 560px) {
+  .sheet-importer__control { grid-template-columns: 1fr; }
+  .sheet-importer__control button { min-height: 50px; border-top: 1px solid var(--line-strong); border-left: 0; }
+}
