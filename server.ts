@@ -28,16 +28,22 @@ import {
 } from './server/question-schemas.js';
 import { validateBlueprintPair } from './server/question-blueprints.js';
 import {
+  fetchTopicArchiveQuestions,
   fetchRandomArchiveQuiz,
   fetchSharedQuiz,
+  getQuizPlayCount,
+  importCuratedSheet,
   isSupabaseConfigured,
   markEvaluationFailed,
   persistEvaluations,
   persistGeneratedQuiz,
+  persistQuizComposition,
+  recordQuizPlay,
   saveQuestionFeedback,
   syncPromptVersions,
   type ResponseAudit,
 } from './server/persistence.js';
+import { googleSheetCsvUrl, parseQuestionSheet, SHEET_TEMPLATE_COLUMNS } from './server/sheet-import.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -89,7 +95,18 @@ function cacheHitRate(usage?: ResponseUsage | null): number | null {
 }
 
 function apiErrorDetails(error: unknown): { status?: number; message: string } {
-  if (!(error instanceof Error)) return { message: String(error) };
+  if (!(error instanceof Error)) {
+    if (typeof error === 'object' && error !== null && 'message' in error) {
+      const record = error as { message?: unknown; status?: unknown; code?: unknown; details?: unknown };
+      const details = typeof record.details === 'string' && record.details ? ` (${record.details})` : '';
+      const code = typeof record.code === 'string' && record.code ? `${record.code}: ` : '';
+      return {
+        status: typeof record.status === 'number' ? record.status : undefined,
+        message: `${code}${String(record.message)}${details}`,
+      };
+    }
+    return { message: String(error) };
+  }
   const possibleStatus = (error as Error & { status?: unknown }).status;
   return { status: typeof possibleStatus === 'number' ? possibleStatus : undefined, message: error.message };
 }
@@ -603,6 +620,7 @@ async function runBackgroundWorkflow(
   externalRunId: string,
   runId: string,
   generationAudit: ResponseAudit,
+  composition?: GeneratedQuestion[],
 ): Promise<void> {
   const savePromise = persistGeneratedQuiz({
     runId,
@@ -616,6 +634,13 @@ async function runBackgroundWorkflow(
   });
   const evaluationOutcome = await evaluateQuestionsInBackground(openai, quiz.questions, generatorResearch, externalRunId);
   const generationSaved = await savePromise;
+  if (generationSaved && composition) {
+    try {
+      await persistQuizComposition(runId, composition);
+    } catch (error) {
+      console.error(`[${externalRunId}-DB] Could not save the five-question composition.`, error);
+    }
+  }
   if ('error' in evaluationOutcome) {
     if (generationSaved) await markEvaluationFailed(runId, externalRunId, evaluationOutcome.error);
     return;
@@ -661,6 +686,57 @@ app.get('/api/health', (_request, response) => {
     generatorModel,
     evaluatorModel,
   });
+});
+
+app.get('/api/play-count', async (_request, response) => {
+  if (!isSupabaseConfigured()) return response.status(503).json({ error: 'Play analytics are not configured.' });
+  try {
+    response.setHeader('Cache-Control', 'no-store');
+    return response.json({ count: await getQuizPlayCount() });
+  } catch (error) {
+    console.error('[PLAYS] Count read failed.', error);
+    return response.status(502).json({ error: 'Could not load the play count.' });
+  }
+});
+
+app.post('/api/quiz-plays', async (request, response) => {
+  const id = String(request.body?.id || '');
+  const topicValidation = validateTopic(request.body?.topic);
+  const mode = request.body?.mode;
+  const runId = request.body?.runId == null ? null : String(request.body.runId);
+  if (!uuidPattern.test(id) || !topicValidation.valid || !['generated', 'random', 'shared'].includes(mode)) {
+    return response.status(400).json({ error: 'Provide a valid play ID, topic, and mode.' });
+  }
+  if (runId !== null && !uuidPattern.test(runId)) return response.status(400).json({ error: 'Provide a valid run ID.' });
+  if (!isSupabaseConfigured()) return response.status(503).json({ error: 'Play analytics are not configured.' });
+  try {
+    const count = await recordQuizPlay({ id, topic: topicValidation.topic, mode, runId });
+    return response.status(201).json({ count });
+  } catch (error) {
+    console.error('[PLAYS] Play write failed.', error);
+    return response.status(502).json({ error: 'Could not record this play.' });
+  }
+});
+
+app.get('/api/dev/question-sheet-template', (_request, response) => {
+  if (process.env.NODE_ENV === 'production' || process.env.VERCEL) return response.status(404).json({ error: 'Not found.' });
+  response.type('text/csv').send(`${SHEET_TEMPLATE_COLUMNS}\n`);
+});
+
+app.post('/api/dev/import-google-sheet', async (request, response) => {
+  if (process.env.NODE_ENV === 'production' || process.env.VERCEL) return response.status(404).json({ error: 'Not found.' });
+  if (!isSupabaseConfigured()) return response.status(503).json({ error: 'Supabase is not configured.' });
+  try {
+    const sheet = googleSheetCsvUrl(String(request.body?.url || '').trim());
+    const sheetResponse = await fetch(sheet.csvUrl, { redirect: 'follow', signal: AbortSignal.timeout(20_000) });
+    if (!sheetResponse.ok) throw new Error('Google could not export this sheet. Set sharing to “Anyone with the link”.');
+    const questions = parseQuestionSheet(await sheetResponse.text());
+    const imported = await importCuratedSheet({ url: sheet.canonicalUrl, title: sheet.title, questions });
+    return response.json({ imported, skipped: questions.length - imported, rows: questions.length });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return response.status(400).json({ error: message });
+  }
 });
 
 app.get('/api/quizzes/:runId', async (request, response) => {
@@ -754,11 +830,23 @@ app.post('/api/generate', async (request, response) => {
   const questionCount = GENERATED_QUESTION_COUNT;
   if (!topicValidation.valid) return response.status(400).json({ error: topicValidation.error });
   const { topic } = topicValidation;
+  const includeArchive = request.body?.includeArchive === true;
   if (!process.env.OPENAI_API_KEY) return response.status(503).json({ error: 'OpenAI is not configured. Add OPENAI_API_KEY to .env and restart the server.' });
 
   const runId = `GEN-${Date.now().toString(36).toUpperCase()}`;
   const startedAt = Date.now();
   try {
+    const archivedQuestions = includeArchive
+      ? deduplicateQuestionsByShortAnswer(
+          (await fetchTopicArchiveQuestions(topic, 10))
+            .filter((question) => validatePlayerFacingQuestion(question).length === 0),
+        ).slice(0, 3)
+      : [];
+    if (includeArchive && archivedQuestions.length !== 3) {
+      return response.status(404).json({
+        error: `The archive does not yet have 3 vetted questions for ${topic}. Import more questions and try again.`,
+      });
+    }
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     console.log(`[${runId}] Quiz generation started.`, {
       questionCount,
@@ -834,10 +922,37 @@ app.post('/api/generate', async (request, response) => {
         sourceCount: candidate.sources.length,
       });
     }
-    console.log(`[${runId}] Sending questions to the webpage now; evaluation will continue in the background.`);
-    response.json(quiz);
+    const responseQuiz: GeneratedQuiz = includeArchive
+      ? {
+          ...quiz,
+          title: `5 Questions on ${topic}`,
+          teaser: 'Three favourites from the archive, plus two freshly researched questions.',
+          questions: [
+            archivedQuestions[0]!, quiz.questions[0]!, archivedQuestions[1]!,
+            quiz.questions[1]!, archivedQuestions[2]!,
+          ].map((question, index) => ({ ...question, position: index + 1 })),
+        }
+      : quiz;
+    const responseCopyIssues = validateGeneratedQuiz(responseQuiz);
+    if (responseCopyIssues.length > 0) {
+      console.warn(`[${runId}] Combined quiz failed deterministic player-copy validation.`, {
+        issues: responseCopyIssues.map(({ code, field }) => ({ code, field })),
+      });
+      return response.status(502).json({ error: 'The combined quiz did not pass our quality checks. Please try again.' });
+    }
+    console.log(`[${runId}] Sending ${responseQuiz.questions.length} questions to the webpage now; evaluation will continue in the background.`);
+    response.json(responseQuiz);
     continueAfterResponse(
-      runBackgroundWorkflow(openai, quiz, generatorResearch, topic, runId, databaseRunId, generationAudit),
+      runBackgroundWorkflow(
+        openai,
+        quiz,
+        generatorResearch,
+        topic,
+        runId,
+        databaseRunId,
+        generationAudit,
+        includeArchive ? responseQuiz.questions : undefined,
+      ),
     );
   } catch (error) {
     const details = apiErrorDetails(error);

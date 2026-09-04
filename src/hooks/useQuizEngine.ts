@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { GENERATED_QUESTION_COUNT, PROGRESSIVE_CLUES_CONTEXT, RANDOM_QUESTION_COUNT } from '../constants';
+import { GENERATED_QUESTION_COUNT, PROGRESSIVE_CLUES_CONTEXT, RANDOM_QUESTION_COUNT, TOPIC_QUESTION_COUNT } from '../constants';
 import { QUESTION_BANK } from '../data/questions';
 import type {
   GeneratedQuestion,
@@ -51,6 +51,7 @@ const initialState: QuizState = {
   generationError: '',
   randomLoading: false,
   randomError: '',
+  includeArchive: false,
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -122,9 +123,9 @@ function isGeneratedQuiz(value: unknown): value is GeneratedQuiz {
     typeof value.title === 'string' &&
     typeof value.teaser === 'string' &&
     Array.isArray(value.questions) &&
-    value.questions.length === GENERATED_QUESTION_COUNT &&
+    [GENERATED_QUESTION_COUNT, TOPIC_QUESTION_COUNT].includes(value.questions.length) &&
     value.questions.every(isGeneratedQuestion) &&
-    value.questions.filter((question) => question.format === 'open_ended').length === 1 &&
+    value.questions.filter((question) => question.format === 'open_ended').length === value.questions.length - 1 &&
     value.questions.filter((question) => question.format === 'progressive_clues').length === 1
   );
 }
@@ -287,11 +288,12 @@ export function useQuizEngine() {
         setState((current) => ({
           ...current,
           screen: 'intro',
-          quizMode: 'generated',
+          quizMode: 'shared',
           topic: result.topic,
           questions: toQuizQuestions(result.questions),
           teaser: result.teaser,
           generationError: '',
+          includeArchive: result.questions.length === TOPIC_QUESTION_COUNT,
         }));
         window.history.replaceState({}, '', QUIZ_PATH);
         window.scrollTo(0, 0);
@@ -330,7 +332,7 @@ export function useQuizEngine() {
     after(REVEAL_MS + 120, () => patch({ roll: false }));
   };
 
-  const begin = async (topic: string): Promise<void> => {
+  const begin = async (topic: string, includeArchive = false): Promise<void> => {
     window.localStorage.removeItem(STORAGE_KEY);
     navigate(HOME_PATH);
     patch({
@@ -353,12 +355,13 @@ export function useQuizEngine() {
       generationError: '',
       randomLoading: false,
       randomError: '',
+      includeArchive,
     });
     try {
       const apiResponse = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic, count: GENERATED_QUESTION_COUNT }),
+        body: JSON.stringify({ topic, count: GENERATED_QUESTION_COUNT, includeArchive }),
       });
       const result: unknown = await apiResponse.json();
       if (!apiResponse.ok) {
@@ -418,6 +421,7 @@ export function useQuizEngine() {
         generationError: '',
         randomLoading: false,
         randomError: '',
+        includeArchive: false,
       });
       navigate(QUIZ_PATH);
       window.scrollTo(0, 0);
@@ -501,8 +505,8 @@ export function useQuizEngine() {
     toggleMenu: () => patch((s) => ({ menu: !s.menu })),
     setOther: (value) => patch({ other: value }),
     startQuiz: () => begin(state.other.trim() || (state.quizMode === 'random' ? initialState.topic : state.topic)),
-    pickTopic: (name) => begin(name),
-    again: () => state.quizMode === 'random' ? void beginRandom() : void begin(state.topic),
+    pickTopic: (name) => begin(name, true),
+    again: () => state.quizMode === 'random' ? void beginRandom() : void begin(state.topic, state.includeArchive),
     newTopic: () => {
       window.localStorage.removeItem(STORAGE_KEY);
       patch({ ...initialState, topic: state.quizMode === 'random' ? initialState.topic : state.topic });
@@ -515,18 +519,31 @@ export function useQuizEngine() {
         setSharedLoadAttempt((attempt) => attempt + 1);
         return;
       }
-      void begin(state.topic);
+      void begin(state.topic, state.includeArchive);
     },
     randomQuiz: () => {
       if (!state.randomLoading) void beginRandom();
     },
     startPlay: () => {
+      const playId = window.crypto.randomUUID();
+      void fetch('/api/quiz-plays', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: playId,
+          topic: state.topic,
+          mode: state.quizMode,
+          runId: state.runId,
+        }),
+      }).then((response) => {
+        if (!response.ok) console.warn('Could not record quiz play.');
+      }).catch((error: unknown) => console.warn('Could not record quiz play.', error));
       patch({ screen: 'quiz', slide: 1 });
       navigate(QUIZ_PATH);
       window.scrollTo(0, 0);
       nextFrame(() => patch({ slide: 0 }));
     },
-    relatedTopic: () => begin(state.topic.toLowerCase().includes('india') ? 'World history' : 'Everyday objects'),
+    relatedTopic: () => begin(state.topic.toLowerCase().includes('india') ? 'World history' : 'Everyday objects', true),
     share: async () => {
       if (!state.runId) {
         patch({ shareStatus: 'This quiz is not available to share' });

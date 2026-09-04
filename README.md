@@ -2,8 +2,8 @@
 
 > A better question changes the room.
 
-A trivia web app: pick a subject, get two questions worth asking, each
-with a cited source. Ported from the [Claude Design](https://claude.ai/design)
+A trivia web app: pick a subject, get three vetted archive questions and two
+newly generated questions, each with a cited source. Ported from the [Claude Design](https://claude.ai/design)
 prototype (`claude.ai/design/p/cc889979-cca6-4d85-b7f0-2dfb5737a315`) into a
 standalone React + Vite app — same paper/archival look, same interactions,
 real deployable code.
@@ -23,6 +23,20 @@ real deployable code.
 npm install
 ```
 
+Run the same fast preflight used by CI before handing off any code change:
+
+```bash
+npm run preflight
+```
+
+Database and PostgREST contract changes also require Docker Desktop:
+
+```bash
+npx supabase start
+npm run db:test
+npm run test:integration
+```
+
 Copy `.env.example` to `.env` and add your OpenAI API key before generating a set:
 
 ```dotenv
@@ -37,6 +51,21 @@ SUPABASE_SECRET_KEY=sb_secret_your-key-here
 The browser calls the local `/api/generate` route. OpenAI and Supabase secret
 keys are read only by the Express backend and are never included in the client
 bundle.
+
+## Local Google Sheet imports
+
+In local development, the landing page includes a Question sheet importer.
+This module and its API route are unavailable on Vercel and in production mode.
+The Google Sheet must be shared with anyone who has the link and use these
+required columns:
+
+```text
+topic,label,context,prompt,answer_short,answer_explanation,source_1_title,source_1_publisher,source_1_url
+```
+
+Second and third sources are optional and use the same column pattern with
+`source_2_` and `source_3_`. Topic values should exactly match a carousel topic
+when the imported questions are intended for that topic's five-question set.
 
 ```bash
 npm run dev       # http://localhost:5173

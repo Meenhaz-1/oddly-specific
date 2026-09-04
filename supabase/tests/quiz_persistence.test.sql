@@ -1,5 +1,5 @@
 begin;
-select plan(75);
+select plan(82);
 
 select has_table('public', 'prompt_versions', 'prompt_versions exists');
 select has_table('public', 'quiz_runs', 'quiz_runs exists');
@@ -9,6 +9,8 @@ select has_table('public', 'question_evaluations', 'question_evaluations exists'
 select has_table('public', 'question_feedback', 'question_feedback exists');
 select has_table('public', 'reference_decks', 'reference_decks exists');
 select has_table('public', 'reference_question_candidates', 'reference candidates exist');
+select has_table('public', 'quiz_play_events', 'quiz play events exist');
+select has_table('public', 'quiz_run_question_sets', 'quiz compositions exist');
 select has_column('public', 'questions', 'origin', 'questions record their origin');
 select has_column('public', 'questions', 'reference_candidate_id', 'questions can reference curated candidates');
 select has_column('public', 'questions', 'topic', 'questions have a category topic');
@@ -19,6 +21,9 @@ select has_function('public', 'save_generated_quiz', array['jsonb', 'jsonb'], 'g
 select has_function('public', 'save_quiz_evaluations', array['uuid', 'jsonb', 'jsonb'], 'evaluation RPC exists');
 select has_function('public', 'get_random_archive_questions', array['integer', 'uuid[]'], 'random archive RPC exists');
 select has_function('public', 'publish_curated_question', array['uuid'], 'curated publication RPC exists');
+select has_function('public', 'record_quiz_play', array['uuid', 'text', 'text', 'uuid'], 'play counter RPC exists');
+select has_function('public', 'get_topic_archive_questions', array['text', 'integer', 'uuid[]'], 'topic archive RPC exists');
+select has_function('public', 'import_curated_sheet', array['text', 'text', 'jsonb'], 'local sheet import RPC exists');
 select has_column('public', 'quiz_runs', 'generation_cached_input_tokens', 'generation cached tokens are stored');
 select has_column('public', 'quiz_runs', 'generation_cache_hit_rate', 'generation cache hit rate is stored');
 select has_column('public', 'quiz_runs', 'generation_prompt_cache_key', 'generation cache key is stored');
@@ -45,6 +50,14 @@ select ok(
 select ok(
   not has_table_privilege('authenticated', 'public.question_feedback', 'select,insert,update,delete'),
   'authenticated has no feedback table privileges'
+);
+select ok(
+  not has_table_privilege('anon', 'public.quiz_play_events', 'select,insert,update,delete'),
+  'anon has no play-event table privileges'
+);
+select ok(
+  not has_function_privilege('anon', 'public.record_quiz_play(uuid,text,text,uuid)', 'execute'),
+  'anon cannot increment play counts directly'
 );
 
 insert into public.prompt_versions (id, prompt_key, version_hash, template, source_paths) values

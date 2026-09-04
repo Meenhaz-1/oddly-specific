@@ -101,7 +101,7 @@ export interface ProgressiveCluesQuestion {
 export type GeneratedQuestion = OpenEndedQuestion | ProgressiveCluesQuestion;
 
 export type QuizScreen = 'landing' | 'making' | 'intro' | 'quiz' | 'done';
-export type QuizMode = 'generated' | 'random';
+export type QuizMode = 'generated' | 'random' | 'shared';
 export type RevealStage = 0 | 1 | 2;
 export type Vote = 'up' | 'down' | null;
 export type ViewerTarget = 'question' | null;
@@ -131,6 +131,7 @@ export interface QuizState {
   generationError: string;
   randomLoading: boolean;
   randomError: string;
+  includeArchive: boolean;
 }
 
 export interface QuizActions {
