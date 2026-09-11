@@ -14,7 +14,7 @@
     "test:blueprints": "tsx scripts/test-question-blueprints.ts",
     "test:unit": "tsx --test server/sheet-import.test.ts",
     "test:integration": "tsx scripts/test-supabase-integration.ts",
-    "preflight": "npm run typecheck && npm run lint && npm run test:unit && npm run test:blueprints && npm run build",
+    "preflight": "npm run typecheck && npm run test:typecheck && npm run lint && npm run test:unit && npm run test:blueprints && npm run test:regression && npm run build && npm run test:browser",
     "build": "vite build",
     "lint": "oxlint",
     "typecheck": "tsc --noEmit",
@@ -24,7 +24,10 @@
     "db:reset": "supabase db reset",
     "db:test": "supabase test db",
     "preview": "vite preview",
-    "start": "tsx server.ts"
+    "start": "tsx server.ts",
+    "test:regression": "vitest run",
+    "test:browser": "playwright test",
+    "test:typecheck": "tsc -p tsconfig.tests.json"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.4",
@@ -39,15 +42,19 @@
     "react-use-measure": "^2.1.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@testing-library/react": "^16.3.3",
     "@types/express": "^5.0.6",
     "@types/node": "^26.3.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.1.0",
+    "jsdom": "^30.0.1",
     "oxlint": "^1.79.0",
     "supabase": "^2.115.0",
     "tsx": "^4.23.12",
     "typescript": "^7.0.2",
-    "vite": "^8.2.2"
+    "vite": "^8.2.2",
+    "vitest": "^5.0.0"
   }
 }

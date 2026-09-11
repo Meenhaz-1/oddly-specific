@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": [
+      "node",
+      "vite/client"
+    ]
+  },
+  "include": [
+    "tests",
+    "vitest.config.ts",
+    "playwright.config.ts",
+    "scripts/test-supabase-integration.ts"
+  ]
+}

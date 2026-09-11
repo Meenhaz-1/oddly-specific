@@ -32,7 +32,7 @@ A strong question should usually have these characteristics:
    - Stop before explaining the central mechanism; reserve it for the reveal.
    - Treat `context` and `prompt` as one complete stem: the exact short answer must not appear in either field, including in a heading or descriptive label.
 4. **Interesting underlying fact**
-   - Prefer unusual mechanisms, consequences, cross-domain links, transformations, contrasts, chronology, economic incentives, or familiar evidence seen from a fresh angle.
+   - Give equal consideration to cultural associations, close observation, patterns, comparisons, language in context, sequences, human choices, and causal explanations. A hidden mechanism or unusual origin is one possibility, not the default definition of an interesting question.
    - Avoid generic trivia.
 5. **Fairness**
    - There should be one clearly intended answer.
@@ -42,24 +42,24 @@ A strong question should usually have these characteristics:
    - No two candidates may have the same `answer.short`, including case-only, punctuation-only, or whitespace-only variations.
    - If a duplicate emerges, keep the stronger construction and replace the other candidate with a genuinely different answer.
 
-## Preferred question styles
+## Breadth of question selection
 
-Use a varied mix of:
+Treat the topic as a field to explore, not a cue for its best-known unusual fact. Its everyday practices, people, works, materials, institutions, environments, conventions, and interactions with other fields can all support questions when the connection to the requested topic is substantive.
 
-- give-funda
-- work-it-out
-- progressive clues
-- connect
-- fill in the blank
-- visual observation
-- identify the hidden purpose
-- original use / unexpected origin
-- mechanism-based reasoning
-- historical consequence
-- cross-domain semantic connection
-- reverse-engineer from an artifact
-- numerical clue
-- occasional multiple choice only when it genuinely helps
+Give these solving experiences equal standing; this list is a menu, not a ranking or a fixed rotation:
+
+- connect independently meaningful observations
+- recognize a person, work, place, or event through well-chosen contextual evidence
+- compare cases and identify the distinction that explains the contrast
+- complete a sourced pattern, sequence, pairing, or relationship
+- interpret a quotation, convention, symbol, or linguistic feature in context
+- infer from a physical detail, spatial arrangement, measurement, or artifact
+- reconstruct a choice, transformation, or consequence from evidence
+- discover a purpose or mechanism when that is the strongest premise
+
+A satisfying reveal may resolve an identity, illuminate a cultural connection, expose a pattern, or make a contrast intelligible. It need not explain a hidden purpose or causal mechanism. Familiar subjects are welcome when the relationship and solving experience are fresh; obscure subjects receive no automatic preference.
+
+Do not equate variety with changing the answer noun while repeating the same construction. Select the subject, evidence, and player action together. Use only constructions that the requested output schema and available evidence can actually express; a text-only question must not depend on an unseen image.
 
 Direct etymology or naming recall is not a default question style. Use it only when a separate, independent reasoning layer is essential to the solve.
 
@@ -111,10 +111,10 @@ If the premise cannot be verified, reject the candidate and generate another.
 
 ## Retrieval budget
 
-- Begin with one broad web search that can support all requested candidates.
-- Make a second search only when a material claim still needs verification.
+- Choose distinct subject directions before searching. Use focused queries for those directions rather than generic searches for interesting facts about the topic.
+- Allocate up to two searches across discovery and verification. The second search may explore the other candidate's distinct subtopic or verify an unresolved material claim.
 - Do not make more than two searches in total.
-- Prefer a small set of authoritative sources that can verify several claims over many narrow searches.
+- Prefer authoritative sources. Do not force both questions to come from one article, search result cluster, or subject simply to share sources. If the budget cannot verify a premise, replace it with a supportable one; never relax factual verification.
 
 ## Compact research record
 

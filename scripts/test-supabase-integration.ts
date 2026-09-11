@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
 
 function loadLocalSupabaseEnvironment(): void {
@@ -9,8 +10,9 @@ function loadLocalSupabaseEnvironment(): void {
     process.env.SUPABASE_SECRET_KEY = process.env.SUPABASE_TEST_SECRET_KEY;
     return;
   }
-  const executable = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-  const output = execFileSync(executable, ['supabase', 'status', '-o', 'env'], {
+  // Execute the installed CLI with Node: Windows cannot execFile a .cmd shim.
+  const cli = fileURLToPath(new URL('../node_modules/supabase/dist/supabase.js', import.meta.url));
+  const output = execFileSync(process.execPath, [cli, 'status', '-o', 'env'], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'inherit'],
   });

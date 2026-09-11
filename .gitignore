@@ -35,3 +35,7 @@ supabase/.branches/
 skills-lock.json
 
 .vercel/
+
+# Browser test artifacts
+test-results/
+playwright-report/
