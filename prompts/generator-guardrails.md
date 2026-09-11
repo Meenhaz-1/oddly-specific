@@ -8,7 +8,11 @@ Success means the premise itself would plausibly earn at least 4 out of 5 for or
 
 Do not commit to the first relevant fact recalled or returned by search. That fact is often prominent because it is widely repeated, not because it supports a strong question.
 
-Before drafting, internally consider several premise directions for each required question. Vary both the subject area and the relationship being tested: mechanism, constraint, consequence, comparison, sequence, purpose, or connection. Do not create several phrasings of the same central fact.
+Before drafting, consider a compact pool of at least six distinct premise directions across at least four relevant facets of the topic. For a narrow topic, use different scales, contexts, participants, practices, or bodies of evidence rather than drifting off-topic. These are provisional possibilities, not six fully researched questions.
+
+Build the pool across subject matter, evidence form, player action, and answer type. Include non-causal possibilities such as contextual recognition, comparison, cultural connection, pattern completion, or close observation. Do not fill the pool with mechanisms, origins, hidden purposes, or several phrasings of one central fact.
+
+Choose the strongest complementary pair, not simply the two most immediately retrievable facts. Its central subjects and factual relationships must differ as well as its blueprint axes. Do not always choose the first branches of this menu. Breadth is a selection criterion alongside fairness, verification, and reveal quality, not permission to ship a weaker question.
 
 An assigned style or direction is an exploration seed, not a deliverable. Abandon it when its best available premise fails this gate, and choose a stronger relationship within the requested topic. Never preserve a weak premise merely to satisfy a format label or direction.
 
@@ -37,9 +41,9 @@ For each surviving premise, define internally:
 3. the reasoning step that connects those observations to the answer
 4. the information reserved for the reveal
 
-The player-facing route must be either fully inferable or anchored by independent clues from different domains. Bare recall of an underlying anecdote, name, date, definition, or standard association is not a route. At the same time, the stem must not disclose the central mechanism merely to make the question solvable.
+The player-facing route must be either fully inferable or anchored by independent clues from different domains. Bare recall of an underlying anecdote, name, date, definition, or standard association is not a route. At the same time, the stem must not disclose the resolution merely to make the question solvable. For recognition, comparison, and completion questions, the resolution can be an identity, distinction, connection, or pattern; no causal mechanism is required.
 
-If removing the mechanism makes the question impossible, the premise has no usable inference path. Discard it instead of restoring the explanation or replacing inference with extra recall clues.
+For a mechanism question, if removing the mechanism makes the question impossible, the premise has no usable inference path. Discard it instead of restoring the explanation or replacing inference with extra recall clues.
 
 ## 4. Keep evidence and resolution on opposite sides of the reveal
 
@@ -81,7 +85,7 @@ Do not repair ambiguity with “be specific” or by accepting a long list of va
 
 ## 7. Require reveal gain
 
-Measure what the player learns only after the answer is revealed. A reveal has value when it completes a causal chain, resolves an apparent contradiction, connects previously separate clues, or changes how the evidence is understood.
+Measure what the player learns only after the answer is revealed. A reveal has value when it completes a causal chain, resolves an apparent contradiction, connects previously separate clues, or changes how the evidence is understood. A well-anchored identity, a meaningful cultural association, a completed pattern, or an illuminating distinction can deliver the same value. Do not reject these merely because they lack a hidden mechanism or origin story.
 
 Reject a candidate when the reveal only labels a mechanism already described, repeats the final clue, confirms a fully retold anecdote, or supplies an obscure name without improving understanding. An interesting fact is not automatically an interesting question.
 
